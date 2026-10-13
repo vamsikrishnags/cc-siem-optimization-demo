@@ -1,0 +1,15 @@
+indicator,indicator_type,threat_category,threat_name,severity,confidence,feed,country_iso,geo_location
+109.238.11.185,ip,exfiltration,Bulk data exfiltration endpoint seen in training capture,critical,90,demo-intel,,
+mrhaha.net,domain,exfiltration,DNS tunneling exfiltration domain (base64 subdomains),critical,95,demo-intel,,
+ptsv2.com,domain,exfiltration,HTTP POST to public paste/test server used for exfiltration,high,80,demo-intel,,
+ijguovmjherm.download,domain,dga,Algorithmically generated domain,high,75,demo-intel,,
+crowns.gg,domain,suspicious-domain,Newly observed suspicious domain,medium,60,demo-intel,,
+safe-iweb.tk,domain,phishing,Phishing kit hosting,medium,65,demo-intel,,
+onlinetv.kg,domain,suspicious-domain,Newly observed suspicious domain,medium,55,demo-intel,,
+maxtorrent.cc,domain,malware,Malware distribution via torrent site,medium,60,demo-intel,,
+fon-betsport.cf,domain,phishing,Phishing domain on free TLD,medium,60,demo-intel,,
+7gmskc3.club,domain,dga,Algorithmically generated domain,high,70,demo-intel,,
+203.0.113.66,ip,bruteforce,SSH brute-force botnet node (synthetic),high,85,demo-intel (synthetic),CN,"39.9042,116.4074"
+203.0.113.45,ip,bruteforce,SSH credential-stuffing source (synthetic),medium,70,demo-intel (synthetic),BR,"-23.5505,-46.6333"
+198.51.100.23,ip,c2,Cobalt Strike team server (synthetic),critical,95,demo-intel (synthetic),RU,"55.7558,37.6173"
+192.0.2.150,ip,malware,Malware download host (synthetic),high,80,demo-intel (synthetic),NL,"52.3676,4.9041"

@@ -1,0 +1,15 @@
+{
+  "index_patterns": ["pipeline_metrics*"],
+  "priority": 200,
+  "template": {
+    "settings": { "number_of_shards": 1, "number_of_replicas": 0, "refresh_interval": "5s" },
+    "mappings": {
+      "properties": {
+        "metric_time": { "type": "date" },
+        "stage":       { "type": "keyword" },
+        "dataset":     { "type": "keyword" },
+        "event_count": { "type": "long" }
+      }
+    }
+  }
+}

@@ -1,0 +1,126 @@
+# Fluent Bit: the laptop-side log shipper.
+#   - tails Zeek JSON logs (conn/dns/http) written by the zeek container
+#   - receives RFC3164 syslog over UDP from the syslog generator (firewall/sshd/sudo/...)
+#   - produces everything, unmodified, to raw topics in Confluent Cloud
+service:
+  flush: 1
+  log_level: info
+  parsers_file: /fluent-bit/etc/parsers.conf
+  http_server: on
+  http_listen: 0.0.0.0
+  http_port: 2020
+  storage.path: /fluent-bit/state/buffer
+  storage.sync: normal
+
+pipeline:
+  inputs:
+    - name: tail
+      tag: zeek.conn
+      path: /zeek-logs/conn.log
+      parser: json
+      db: /fluent-bit/state/zeek-conn.db
+      read_from_head: true
+      refresh_interval: 2
+      rotate_wait: 30
+      skip_long_lines: on
+      mem_buf_limit: 20MB
+      storage.type: filesystem
+
+    - name: tail
+      tag: zeek.dns
+      path: /zeek-logs/dns.log
+      parser: json
+      db: /fluent-bit/state/zeek-dns.db
+      read_from_head: true
+      refresh_interval: 2
+      rotate_wait: 30
+      skip_long_lines: on
+      mem_buf_limit: 20MB
+      storage.type: filesystem
+
+    - name: tail
+      tag: zeek.http
+      path: /zeek-logs/http.log
+      parser: json
+      db: /fluent-bit/state/zeek-http.db
+      read_from_head: true
+      refresh_interval: 2
+      rotate_wait: 30
+      skip_long_lines: on
+      mem_buf_limit: 20MB
+      storage.type: filesystem
+
+    - name: syslog
+      tag: syslog
+      mode: udp
+      listen: 0.0.0.0
+      port: 5140
+      parser: syslog-rfc3164
+      buffer_chunk_size: 32KB
+      storage.type: filesystem
+
+  filters:
+    - name: record_modifier
+      match: zeek.*
+      record: sensor ${SENSOR_NAME}
+
+  outputs:
+    - name: kafka
+      match: zeek.conn
+      topics: zeek_conn_raw
+      brokers: ${KAFKA_BOOTSTRAP}
+      format: json
+      timestamp_key: '@timestamp'
+      timestamp_format: iso8601
+      rdkafka.security.protocol: ${KAFKA_SECURITY_PROTOCOL}
+      rdkafka.sasl.mechanism: PLAIN
+      rdkafka.sasl.username: ${KAFKA_API_KEY}
+      rdkafka.sasl.password: ${KAFKA_API_SECRET}
+      rdkafka.client.id: fluent-bit-siem-${DEMO_ID}
+      rdkafka.compression.codec: lz4
+      rdkafka.linger.ms: 200
+
+    - name: kafka
+      match: zeek.dns
+      topics: zeek_dns_raw
+      brokers: ${KAFKA_BOOTSTRAP}
+      format: json
+      timestamp_key: '@timestamp'
+      timestamp_format: iso8601
+      rdkafka.security.protocol: ${KAFKA_SECURITY_PROTOCOL}
+      rdkafka.sasl.mechanism: PLAIN
+      rdkafka.sasl.username: ${KAFKA_API_KEY}
+      rdkafka.sasl.password: ${KAFKA_API_SECRET}
+      rdkafka.client.id: fluent-bit-siem-${DEMO_ID}
+      rdkafka.compression.codec: lz4
+      rdkafka.linger.ms: 200
+
+    - name: kafka
+      match: zeek.http
+      topics: zeek_http_raw
+      brokers: ${KAFKA_BOOTSTRAP}
+      format: json
+      timestamp_key: '@timestamp'
+      timestamp_format: iso8601
+      rdkafka.security.protocol: ${KAFKA_SECURITY_PROTOCOL}
+      rdkafka.sasl.mechanism: PLAIN
+      rdkafka.sasl.username: ${KAFKA_API_KEY}
+      rdkafka.sasl.password: ${KAFKA_API_SECRET}
+      rdkafka.client.id: fluent-bit-siem-${DEMO_ID}
+      rdkafka.compression.codec: lz4
+      rdkafka.linger.ms: 200
+
+    - name: kafka
+      match: syslog
+      topics: syslog_raw
+      brokers: ${KAFKA_BOOTSTRAP}
+      format: json
+      timestamp_key: '@timestamp'
+      timestamp_format: iso8601
+      rdkafka.security.protocol: ${KAFKA_SECURITY_PROTOCOL}
+      rdkafka.sasl.mechanism: PLAIN
+      rdkafka.sasl.username: ${KAFKA_API_KEY}
+      rdkafka.sasl.password: ${KAFKA_API_SECRET}
+      rdkafka.client.id: fluent-bit-siem-${DEMO_ID}
+      rdkafka.compression.codec: lz4
+      rdkafka.linger.ms: 200

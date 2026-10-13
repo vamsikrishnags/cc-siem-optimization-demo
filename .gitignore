@@ -1,0 +1,25 @@
+# --- local inputs and generated secrets (never commit) ---
+# any copy of the inputs file (demo.properties, demo1.properties, ...); the .example is still committed
+/demo*.properties
+*.properties.bak
+.env
+docker/.env
+
+# --- Terraform: local state belongs to one demo run and contains API secrets ---
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/crash.log
+# (.terraform.lock.hcl IS committed: it pins provider versions)
+
+# --- large sample data (downloaded by scripts/02-start-local.sh) ---
+/data/
+
+# --- tooling ---
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
+.claude/

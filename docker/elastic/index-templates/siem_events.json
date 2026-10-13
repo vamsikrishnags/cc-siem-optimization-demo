@@ -1,0 +1,45 @@
+{
+  "index_patterns": ["siem_events*"],
+  "priority": 200,
+  "template": {
+    "settings": { "number_of_shards": 1, "number_of_replicas": 0, "refresh_interval": "5s" },
+    "mappings": {
+      "dynamic_templates": [
+        { "strings_as_keyword": { "match_mapping_type": "string", "mapping": { "type": "keyword", "ignore_above": 2048 } } }
+      ],
+      "properties": {
+        "event_time": { "type": "date" },
+        "event": {
+          "properties": {
+            "kind": { "type": "keyword" }, "category": { "type": "keyword" }, "action": { "type": "keyword" },
+            "outcome": { "type": "keyword" }, "dataset": { "type": "keyword" }, "severity": { "type": "integer" },
+            "severity_label": { "type": "keyword" }, "rule": { "type": "keyword" }
+          }
+        },
+        "source":      { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "port": { "type": "integer" } } },
+        "destination": { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "port": { "type": "integer" },
+                                         "domain": { "type": "keyword" } } },
+        "network":     { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" },
+                                         "bytes": { "type": "long" } } },
+        "user":        { "properties": { "name": { "type": "keyword" } } },
+        "host":        { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "name": { "type": "keyword" },
+                                         "owner_team": { "type": "keyword" }, "department": { "type": "keyword" },
+                                         "criticality": { "type": "keyword" }, "os": { "type": "keyword" },
+                                         "zone": { "type": "keyword" } } },
+        "threat": {
+          "properties": {
+            "matched": { "type": "boolean" }, "indicator": { "type": "keyword" }, "indicator_type": { "type": "keyword" },
+            "category": { "type": "keyword" }, "name": { "type": "keyword" }, "confidence": { "type": "integer" },
+            "feed": { "type": "keyword" }, "country_iso_code": { "type": "keyword" },
+            "geo_location": { "type": "geo_point", "ignore_malformed": true }
+          }
+        },
+        "url":        { "properties": { "domain": { "type": "keyword" }, "original": { "type": "keyword", "ignore_above": 4096 } } },
+        "user_agent": { "type": "keyword", "ignore_above": 1024 },
+        "message":    { "type": "text" },
+        "observer":   { "type": "keyword" },
+        "log_uid":    { "type": "keyword" }
+      }
+    }
+  }
+}

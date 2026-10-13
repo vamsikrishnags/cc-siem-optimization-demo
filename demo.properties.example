@@ -1,0 +1,58 @@
+# =====================================================================
+#  Confluent SIEM Optimization Demo - inputs
+#  Copy to demo.properties and fill in. demo.properties is git-ignored.
+#  Format: KEY=value (no spaces around '='; quote values with spaces)
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Demo id - unique suffix appended to every resource name
+# (environment, cluster, Flink pool and statements, API keys, Connect group).
+# Leave empty: ./scripts/00-check-prereqs.sh generates one and writes it here.
+# Keep it for the life of the demo so teardown and re-runs find the same resources.
+# ---------------------------------------------------------------------
+DEMO_ID=
+
+# ---------------------------------------------------------------------
+# Confluent Cloud - bootstrap service account (see README "Prerequisites")
+# Suggested name: siem-demo-<DEMO_ID>-admin
+# ---------------------------------------------------------------------
+# Service account id (sa-xxxxxx) that owns the Cloud API key below.
+CC_SERVICE_ACCOUNT_ID=
+# Cloud API key + secret OWNED BY that service account (resource scope: "Cloud resource management").
+CC_CLOUD_API_KEY=
+CC_CLOUD_API_SECRET=
+
+# Leave empty to CREATE a new environment "<CC_ENVIRONMENT_NAME>-<DEMO_ID>" (service account needs OrganizationAdmin).
+# Set to an existing env-xxxxx to reuse it (service account needs EnvironmentAdmin on it).
+CC_ENVIRONMENT_ID=
+CC_ENVIRONMENT_NAME=siem-demo
+
+# Cloud + region for the Standard cluster and the Flink compute pool.
+# AWS and AZURE are both verified end to end, including lake-query.
+CC_CLOUD=AWS
+CC_REGION=us-east-2
+CC_CLUSTER_NAME=siem-demo
+CC_FLINK_MAX_CFU=10
+
+# Optional: Tableflow API key owned by the service account (resource scope "Tableflow").
+# Leave empty and Terraform creates it - that needs OrganizationAdmin, or ResourceOwner on the service account.
+# With an EnvironmentAdmin service account, create it in the console (README "Tableflow API key") and paste it here.
+TABLEFLOW_API_KEY=
+TABLEFLOW_API_SECRET=
+
+# ---------------------------------------------------------------------
+# PII masking - salt used to pseudonymize user names before they reach the SIEM
+# ---------------------------------------------------------------------
+PII_HASH_SALT=change-me-demo-salt
+
+# ---------------------------------------------------------------------
+# Local laptop (Docker)
+# ---------------------------------------------------------------------
+# Public Zeek "exfiltration exercise" capture used by confluentinc/demo-siem-optimization (~1 GB)
+PCAP_URL=https://demo-siem-optimization.s3.us-east-2.amazonaws.com/pcaps/zeek_streamer.pcap
+# Replay speed multiplier for tcpreplay (1 = real time, 2 = twice as fast)
+PCAP_REPLAY_MULTIPLIER=1
+# Synthetic firewall / sshd / system syslog events per second
+SYSLOG_EVENTS_PER_SEC=40
+# Public ad/tracker watchlist loaded into threat_intel (from the reference repo)
+WATCHLIST_URL=https://raw.githubusercontent.com/confluentinc/demo-siem-optimization/main/spooldir/ad_hosts/csv_input/ad_servers.csv

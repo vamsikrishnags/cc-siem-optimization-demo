@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIEM Pipeline Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f17;
+    --bg-2: #111827;
+    --panel: #131a26;
+    --panel-2: #182132;
+    --line: #243045;
+    --text: #e6edf6;
+    --muted: #93a1b6;
+    --faint: #5b6a80;
+    --accent: #38bdf8;
+
+    --laptop: #94a3b8;      /* laptop / Docker */
+    --cc: #3b82f6;          /* Confluent Cloud boundary */
+    --kafka: #22d3ee;       /* Kafka topics */
+    --ref: #f59e0b;         /* reference / lookup data */
+    --flink: #c084fc;       /* Flink */
+    --gov: #2dd4bf;         /* governed (Schema Registry) topics */
+    --egress: #34d399;      /* egress topics */
+    --connect: #60a5fa;     /* Kafka Connect */
+    --elastic: #facc15;     /* Elastic SIEM */
+    --lake: #fb7185;        /* Tableflow / Iceberg */
+    --sr: #a3e635;          /* Schema Registry */
+
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body { display: flex; flex-direction: column; }
+
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0f1522, #0b0f17);
+  }
+  .brand { display: flex; flex-direction: column; min-width: 240px; }
+  .brand h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: .2px; }
+  .brand span { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+  button, select {
+    font: 500 12.5px var(--sans); color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 11px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #3a4a66; }
+  button.primary { background: #0e3a5c; border-color: #1f6aa5; }
+  button.primary:hover { background: #114a76; }
+  button:disabled { opacity: .4; cursor: default; }
+  label.toggle { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 420px; min-height: 0; }
+  #stage { position: relative; min-height: 420px; }
+  #network { position: absolute; inset: 0; }
+  .hint {
+    position: absolute; left: 12px; bottom: 12px; font-size: 11.5px; color: var(--faint);
+    background: rgba(11,15,23,.75); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; pointer-events: none;
+  }
+  #legend {
+    position: absolute; left: 12px; top: 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; max-width: 70%;
+    background: rgba(11,15,23,.8); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 11.5px; color: var(--muted);
+  }
+  #legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  #legend .ln { display: inline-block; width: 18px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: 3px; }
+
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; padding: 12px; color: var(--muted); font-weight: 600; }
+  .tabs button.active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+  .pane { overflow: auto; padding: 16px; flex: 1; display: none; }
+  .pane.active { display: block; }
+
+  .kicker { font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .08em; }
+  .title { font-size: 18px; font-weight: 700; margin: 4px 0 2px; word-break: break-word; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; line-height: 1.45; }
+  dl.meta { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin: 0 0 14px; font-size: 12.5px; }
+  dl.meta dt { color: var(--faint); }
+  dl.meta dd { margin: 0; color: var(--text); word-break: break-word; }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+  code { background: #0d1320; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: #cfe3ff; }
+  h3 { font-size: 13px; margin: 16px 0 8px; color: var(--text); }
+  ul.ops { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  ul.ops li { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 12.5px; line-height: 1.45; }
+  ul.ops li b { color: var(--text); }
+  ul.ops li .why { display: block; color: var(--muted); margin-top: 3px; }
+  ul.ops li .why::before { content: "why → "; color: var(--faint); }
+  .tag { display: inline-block; font: 600 10.5px var(--sans); padding: 2px 7px; border-radius: 999px; border: 1px solid; margin: 0 4px 4px 0; }
+  .empty { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .empty kbd { font-family: var(--mono); font-size: 11px; background: #0d1320; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+  pre.data {
+    margin: 8px 0 0; padding: 10px 12px; background: #0a0f19; border: 1px solid var(--line); border-radius: 10px;
+    font: 11.5px/1.5 var(--mono); color: #c9d6e8; white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
+  }
+  .j-key { color: #7dd3fc; } .j-str { color: #a7f3d0; } .j-num { color: #fcd34d; } .j-bool { color: #f9a8d4; } .j-null { color: #94a3b8; }
+  .hl { background: rgba(250, 204, 21, .18); border-radius: 3px; padding: 0 2px; color: #fde68a; }
+
+  .scenario-pick { display: flex; gap: 8px; margin-bottom: 12px; }
+  .scenario-pick select { flex: 1; }
+  .outcome { border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; line-height: 1.45; border: 1px solid; }
+  .outcome.kept { background: rgba(52,211,153,.08); border-color: rgba(52,211,153,.35); }
+  .outcome.dropped { background: rgba(251,113,133,.08); border-color: rgba(251,113,133,.35); }
+  .outcome.metric { background: rgba(56,189,248,.08); border-color: rgba(56,189,248,.35); }
+  ol.steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; counter-reset: s; }
+  ol.steps li { border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px; padding: 9px 11px; cursor: pointer; }
+  ol.steps li.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  ol.steps li .st { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; font-weight: 600; }
+  ol.steps li .st::before { counter-increment: s; content: counter(s); font: 600 10.5px var(--mono); color: var(--bg); background: var(--accent); border-radius: 999px; min-width: 18px; height: 18px; display: inline-grid; place-items: center; }
+  ol.steps li .note { color: var(--muted); font-size: 12px; margin: 4px 0 0 26px; line-height: 1.45; }
+  ol.steps li pre.data { margin-left: 26px; display: none; }
+  ol.steps li.active pre.data { display: block; }
+  /* stays pinned while the step list scrolls (the pane has 16px padding, hence top: -16px) */
+  .stepnav {
+    position: sticky; top: -16px; z-index: 5; display: flex; gap: 8px; align-items: center;
+    margin: 0 -16px 12px; padding: 10px 16px; background: rgba(19, 26, 38, .96);
+    border-bottom: 1px solid var(--line); backdrop-filter: blur(6px);
+  }
+  .stepnav button { flex: 1; }
+  .stepnav .count { font: 600 11.5px var(--mono); color: var(--muted); min-width: 52px; text-align: center; }
+
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); max-height: none; }
+    #legend { max-width: calc(100% - 24px); }
+    header { padding: 10px 16px; }
+    .controls { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Confluent SIEM Optimization: Data Flow</h1>
+    <span>Sources → Ingestion topics → Flink processing → Egress topics → Destinations</span>
+  </div>
+  <div class="controls">
+    <select id="scenario" aria-label="Sample data scenario"></select>
+    <button class="primary" id="btnTrace">▶ Show sample data</button>
+    <button id="btnClear">Clear highlight</button>
+    <label class="toggle"><input type="checkbox" id="chkLabels" checked> edge labels</label>
+    <button id="btnFit">Fit view</button>
+    <button id="btnReset">Reset layout</button>
+  </div>
+</header>
+
+<main>
+  <section id="stage">
+    <div id="network" aria-label="Interactive architecture diagram"></div>
+    <div id="legend"></div>
+    <div class="hint">Drag nodes · scroll to zoom · drag background to pan · click a node for details</div>
+  </section>
+  <aside>
+    <div class="tabs">
+      <button class="active" data-tab="details">Details</button>
+      <button data-tab="trace">Sample data flow</button>
+    </div>
+    <div class="pane active" id="pane-details">
+      <div class="empty">
+        <p><b>Click any node</b> to see its topic name and naming template, schema type, key and retention,
+        and every Flink transformation with <i>why</i> it exists.</p>
+        <p>Open <b>Sample data flow</b> (or press <kbd>▶ Show sample data</kbd>) to follow one real record from the log source
+        to Elastic and the Iceberg lake, step by step.</p>
+        <p>Naming: <code>&lt;id&gt;</code> is the <code>DEMO_ID</code> from <code>demo.properties</code>.
+        The cluster is <code>siem-demo-&lt;id&gt;</code>, statements are <code>siem-&lt;id&gt;-*</code>, and API keys are <code>siem-&lt;id&gt;-*</code>.</p>
+      </div>
+    </div>
+    <div class="pane" id="pane-trace">
+      <div class="scenario-pick">
+        <select id="scenario2" aria-label="Sample data scenario"></select>
+      </div>
+      <div id="traceBody"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+/* ============================================================================================
+   Model: every node, edge and sample record below is taken from this repository
+   (terraform/, flink/ddl, flink/dml, docker/) and from records the running pipeline produced.
+   ============================================================================================ */
+
+const C = {
+  laptop: '#94a3b8', kafka: '#22d3ee', ref: '#f59e0b', flink: '#c084fc', gov: '#2dd4bf',
+  egress: '#34d399', connect: '#60a5fa', elastic: '#facc15', lake: '#fb7185', sr: '#a3e635', cc: '#3b82f6'
+};
+
+const COLUMNS = [
+  { name: 'SOURCES',           x: 125 },
+  { name: 'INGESTION TOPICS',  x: 540 },
+  { name: 'FLINK PROCESSING',  x: 1105 },
+  { name: 'EGRESS TOPICS',     x: 1700 },
+  { name: 'DESTINATIONS',      x: 2215 },
+];
+
+const NODES = [
+  /* ------------------------------------------------------------------ SOURCES (laptop) */
+  { id: 'zeek', x: 0, y: -260, kind: 'source', color: C.laptop,
+    label: '<b>Zeek 8.0 sensor</b>\npcap replay → conn / dns / http\nJSON logs',
+    title: 'Zeek network sensor',
+    meta: { Where: 'Laptop · Docker <code>zeek</code>', Input: 'Public 42-min "exfiltration exercise" pcap, looped by <code>tcpreplay</code> onto a dummy NIC',
+            Output: '<code>conn.log</code>, <code>dns.log</code>, <code>http.log</code> (JSON, <code>id_orig_h</code> style flat names)', Files: '<code>docker/zeek/</code>' },
+    ops: [
+      { b: 'Live sniffing of replayed packets', w: 'produces logs with current timestamps, so the demo looks like live traffic' },
+      { b: '<code>long-connections.zeek</code>: interim conn record every 5 MB', w: 'the 55 MB exfiltration flow never ends while the pcap loops, so without this it would never be logged' },
+      { b: 'Logs rotated every 10 min and deleted', w: 'keeps laptop disk bounded while the capture loops forever' },
+    ] },
+  { id: 'gen', x: 0, y: 40, kind: 'source', color: C.laptop,
+    label: '<b>Syslog generator</b>\nfirewall · sshd · sudo · IAM\n~40 events/s, RFC3164 over UDP',
+    title: 'Synthetic syslog generator',
+    meta: { Where: 'Laptop · Docker <code>syslog-generator</code>', Output: 'RFC3164 lines → UDP 5140 on Fluent Bit', File: '<code>docker/tools/syslog_generator.py</code>' },
+    ops: [
+      { b: '~97% routine noise', w: 'firewall ACCEPTs, cron, systemd, NTP and health checks are what make SIEM ingest expensive' },
+      { b: 'Scripted attacks', w: 'SSH brute force → foothold → sudo → backdoor user; C2 beacon allowed by the firewall; port scans; password/MFA resets carrying e-mail PII' },
+      { b: 'Attacker IPs from RFC 5737 ranges', w: 'synthetic, never a real third party' },
+    ] },
+  { id: 'fb', x: 250, y: -110, kind: 'source', color: C.laptop,
+    label: '<b>Fluent Bit 5.1</b>\ntail + syslog input\n→ Kafka producer (SASL_SSL)',
+    title: 'Log shipper',
+    meta: { Where: 'Laptop · Docker <code>fluent-bit</code>', Client: '<code>fluent-bit-siem-&lt;id&gt;</code>', Format: 'JSON, <code>@timestamp</code> added, lz4', File: '<code>docker/fluent-bit/fluent-bit.yaml</code>' },
+    ops: [
+      { b: 'Ships logs <i>unchanged</i> (only adds <code>sensor</code> and <code>@timestamp</code>)', w: 'all parsing and decisions happen once, centrally, in Flink, not in agent config on every host' },
+      { b: 'Filesystem buffering + tail DB offsets', w: 'no loss or duplicates if the network or Confluent Cloud is briefly unreachable' },
+    ] },
+  { id: 'loader', x: 0, y: 360, kind: 'source', color: C.laptop,
+    label: '<b>Reference loader</b>\nthreat intel CSV + public watchlist\nasset inventory (CMDB)',
+    title: 'Reference data loader',
+    meta: { Where: 'Laptop · Docker <code>reference-loader</code> (one-shot)', Serializer: 'Avro key + value via Schema Registry (<code>use.latest.version</code>)',
+            Files: '<code>docker/tools/reference_loader.py</code>, <code>docker/tools/data/*.csv</code>' },
+    ops: [
+      { b: '14 curated IoCs + ~9.5k ad/tracker domains', w: 'IoCs for exfiltration, C2, brute force, DGA and phishing; the watchlist shows bulk enrichment at scale' },
+      { b: 'Each asset written twice (by IP and by hostname)', w: 'network logs know IPs, syslog knows hostnames, and both must resolve to the same CMDB record' },
+      { b: '<code>add-indicator</code> mode (live demo)', w: 'a new IoC takes effect in seconds, with no SIEM rule change' },
+    ] },
+
+  /* ------------------------------------------------------------------ INGESTION TOPICS */
+  { id: 't_conn_raw', x: 540, y: -340, kind: 'topic', color: C.kafka, label: '<b>zeek_conn_raw</b>\nschemaless JSON',
+    meta: { Topic: '<code>zeek_conn_raw</code>', Created: 'Terraform (<code>confluent_kafka_topic</code>)', Schema: 'none. Flink sees <code>key</code>/<code>val</code> BYTES', Partitions: '3', Retention: '1 day (landing zone)' },
+    ops: [{ b: 'Raw landing zone', w: 'short retention is enough because the full-fidelity copy lives in Iceberg via Tableflow' }] },
+  { id: 't_dns_raw', x: 540, y: -220, kind: 'topic', color: C.kafka, label: '<b>zeek_dns_raw</b>\nschemaless JSON',
+    meta: { Topic: '<code>zeek_dns_raw</code>', Created: 'Terraform', Schema: 'none (<code>key</code>/<code>val</code> BYTES)', Partitions: '3', Retention: '1 day' }, ops: [] },
+  { id: 't_http_raw', x: 540, y: -100, kind: 'topic', color: C.kafka, label: '<b>zeek_http_raw</b>\nschemaless JSON',
+    meta: { Topic: '<code>zeek_http_raw</code>', Created: 'Terraform', Schema: 'none (<code>key</code>/<code>val</code> BYTES)', Partitions: '3', Retention: '1 day' }, ops: [] },
+  { id: 't_syslog_raw', x: 540, y: 20, kind: 'topic', color: C.kafka, label: '<b>syslog_raw</b>\nschemaless JSON',
+    meta: { Topic: '<code>syslog_raw</code>', Created: 'Terraform', Schema: 'none (<code>key</code>/<code>val</code> BYTES)', Partitions: '3', Retention: '1 day' }, ops: [] },
+  { id: 't_ti', x: 540, y: 300, kind: 'ref', color: C.ref, label: '<b>threat_intel</b>\nAvro · upsert · compacted',
+    meta: { Topic: '<code>threat_intel</code>', Created: 'Flink DDL <code>siem-&lt;id&gt;-ddl-threat-intel</code>', Schema: 'Avro key <code>{indicator}</code> + value (SR subjects <code>threat_intel-key/-value</code>)',
+            Key: 'PRIMARY KEY <code>indicator</code>', Partitions: '1 bucket', Mode: "<code>changelog.mode = 'upsert'</code>, cleanup compact", Watermark: '<code>$rowtime - 1 s</code> (ALTER TABLE)' },
+    ops: [{ b: 'Versioned table for temporal joins', w: 'each event is enriched with the intel that was valid <i>at its event time</i>, which is point-in-time correct and replayable' }] },
+  { id: 't_asset', x: 540, y: 420, kind: 'ref', color: C.ref, label: '<b>asset_inventory</b>\nAvro · upsert · compacted',
+    meta: { Topic: '<code>asset_inventory</code>', Created: 'Flink DDL <code>siem-&lt;id&gt;-ddl-asset-inventory</code>', Schema: 'Avro key <code>{asset_id}</code> + value', Key: '<code>asset_id</code> = IP or hostname', Partitions: '1 bucket', Watermark: '<code>$rowtime - 1 s</code>' },
+    ops: [{ b: 'CMDB lookup', w: 'adds owner team, department, criticality (tier1–3), OS and zone, so analysts triage by business impact' }] },
+
+  /* ------------------------------------------------------------------ FLINK: NORMALIZE */
+  { id: 'f_norm', x: 830, y: -160, kind: 'flink', color: C.flink, shape: 'box',
+    label: '<b>siem-‹id›-normalize</b>\nSTATEMENT SET · 4 × INSERT\nparse · type · schematize',
+    meta: { Statement: '<code>siem-&lt;id&gt;-normalize</code>', SQL: '<code>flink/dml/01_normalize_raw_logs.sql</code>', Reads: 'the 4 raw topics', Writes: '<code>zeek_conn</code>, <code>zeek_dns</code>, <code>zeek_http</code>, <code>syslog_events</code>' },
+    ops: [
+      { b: '<code>JSON_VALUE</code> / <code>JSON_QUERY</code> on <code>CAST(val AS STRING)</code>', w: '<b>normalization</b> and <b>schema addition</b>: schemaless JSON becomes typed Avro columns registered in Schema Registry (Tableflow requires a schema)' },
+      { b: '<code>REGEXP_EXTRACT</code> on free-text syslog', w: 'turns "Failed password for … from 203.0.113.45 port …" into <code>event_type</code>, <code>action</code>, <code>src_ip</code>, <code>dst_port</code> and <code>user_name</code>' },
+      { b: '<code>TRY_CAST</code> for numbers, <code>pri</code> → facility/severity', w: 'a malformed record yields NULLs instead of failing the job' },
+      { b: 'DNS query lower-cased, <code>.localdomain</code> suffix stripped', w: 'so IoC / watchlist joins match exactly' },
+      { b: '<code>event_time</code> = Kafka ingest time, <code>WATERMARK … - 5 s</code>', w: 'event-time semantics for temporal joins and windows downstream' },
+      { b: '<b>No filtering</b>, and <code>raw_log</code> is kept', w: 'these tables are the full-fidelity, unmasked copy that Tableflow lands in Iceberg' },
+    ] },
+
+  /* ------------------------------------------------------------------ FLINK: GOVERNED TABLES */
+  { id: 'g_conn', x: 1090, y: -340, kind: 'gov', color: C.gov, label: '<b>zeek_conn</b>\nAvro · key uid',
+    meta: { Topic: '<code>zeek_conn</code>', Created: 'Flink DDL <code>siem-&lt;id&gt;-ddl-zeek-conn</code>', Schema: 'Avro (SR <code>zeek_conn-key/-value</code>)', Key: '<code>uid</code> (DISTRIBUTED BY, 3 buckets)', Retention: '3 days', Tableflow: 'enabled → Iceberg' },
+    ops: [{ b: '20 typed columns incl. <code>orig_bytes</code>, <code>conn_state</code>, <code>local_orig</code>, <code>raw_log</code>', w: 'governed contract shared by Flink, Tableflow and any other consumer' }] },
+  { id: 'g_dns', x: 1090, y: -220, kind: 'gov', color: C.gov, label: '<b>zeek_dns</b>\nAvro · key uid',
+    meta: { Topic: '<code>zeek_dns</code>', Created: 'Flink DDL', Schema: 'Avro (SR)', Key: '<code>uid</code>', Retention: '3 days', Tableflow: 'enabled → Iceberg' }, ops: [] },
+  { id: 'g_http', x: 1090, y: -100, kind: 'gov', color: C.gov, label: '<b>zeek_http</b>\nAvro · key uid',
+    meta: { Topic: '<code>zeek_http</code>', Created: 'Flink DDL', Schema: 'Avro (SR)', Key: '<code>uid</code>', Retention: '3 days', Tableflow: 'enabled → Iceberg' }, ops: [] },
+  { id: 'g_syslog', x: 1090, y: 20, kind: 'gov', color: C.gov, label: '<b>syslog_events</b>\nAvro · key host',
+    meta: { Topic: '<code>syslog_events</code>', Created: 'Flink DDL', Schema: 'Avro (SR)', Key: '<code>host</code>', Retention: '3 days', Tableflow: 'enabled → Iceberg' },
+    ops: [{ b: 'Keeps the <b>real</b> <code>user_name</code> and e-mails', w: 'governed re-identification in the lake, never in the SIEM' }] },
+  { id: 'sr', x: 1090, y: 300, kind: 'sr', color: C.sr, shape: 'box', label: '<b>Schema Registry</b>\n(environment)\n‹table›-key / -value',
+    meta: { Scope: 'Environment-level (shared by clusters in the environment)', Subjects: '<code>zeek_*</code>, <code>syslog_events</code>, <code>siem_events</code>, <code>pipeline_metrics</code>, <code>threat_intel</code>, <code>asset_inventory</code> (-key / -value)', Cleanup: '<code>scripts/delete_schemas.py</code> (hard delete, run by teardown)' },
+    ops: [{ b: 'Data contracts for every Flink table', w: 'producers, Flink, the Elasticsearch connector (AvroConverter) and Tableflow all agree on one schema' }] },
+
+  /* ------------------------------------------------------------------ FLINK: SIEM ROUTING */
+  { id: 'f_net', x: 1380, y: -340, kind: 'flink', color: C.flink, label: '<b>siem-‹id›-siem-network</b>\nfilter · 2 temporal joins · ECS',
+    meta: { Statement: '<code>siem-&lt;id&gt;-siem-network</code>', SQL: '<code>flink/dml/10_siem_network.sql</code>', Reads: '<code>zeek_conn</code> ⋈ <code>threat_intel</code> ⋈ <code>asset_inventory</code>', Writes: '<code>siem_events</code>', Volume: '~330/min in → ~1/min out' },
+    ops: [
+      { b: 'Temporal join <code>threat_intel FOR SYSTEM_TIME AS OF event_time</code> on the remote IP', w: '<b>threat-intel IoC</b> match, using <b>point-in-time enrichment</b>' },
+      { b: 'Rule: outbound ≥ 5 MB to the internet', w: '<b>data exfiltration</b> (the 55 MB transfer arrives as interim records)' },
+      { b: 'Rule: inbound to 22/23/445/1433/3306/3389/5432/5900', w: '<b>sensitive port probing</b> / exposed services' },
+      { b: 'Rule: internal → internet on a non-standard port', w: '<b>traffic bypassing</b> the usual web/DNS egress paths (e.g. TCP/444, Teredo UDP/3544)' },
+      { b: 'Temporal join <code>asset_inventory</code> on the local IP', w: 'adds business context: owner, criticality, zone' },
+      { b: '<code>GREATEST(...)</code> severity 1–4 + label', w: 'one score combining rule severity and intel severity' },
+      { b: '<code>ROW(...)</code> into nested <code>event / source / destination / network / host / threat</code>', w: '<b>ECS struct packaging</b>, so Kibana fields read <code>source.ip</code>, <code>threat.name</code>' },
+      { b: '<code>WHERE rule_name IS NOT NULL</code>', w: '<b>filter</b>: everything else is dropped from the SIEM feed (still in the lake)' },
+    ] },
+  { id: 'f_dns', x: 1380, y: -220, kind: 'flink', color: C.flink, label: '<b>siem-‹id›-siem-dns</b>\nfilter · 3 temporal joins · ECS',
+    meta: { Statement: '<code>siem-&lt;id&gt;-siem-dns</code>', SQL: '<code>flink/dml/11_siem_dns.sql</code>', Reads: '<code>zeek_dns</code> ⋈ <code>threat_intel</code> ×2 ⋈ <code>asset_inventory</code>', Writes: '<code>siem_events</code>', Volume: '~250/min in → tens out' },
+    ops: [
+      { b: 'Two temporal joins to <code>threat_intel</code>: exact query <i>and</i> registered domain (<code>REGEXP_EXTRACT</code> last two labels)', w: '<b>IoC</b> matches for any sub-domain of a bad domain (DGA, phishing, exfiltration)' },
+      { b: 'Rule: first label ≥ 50 chars', w: '<b>DNS tunneling</b>: base64-encoded sub-domains of <code>mrhaha.net</code> carry stolen data' },
+      { b: 'Watchlist category <code>adware</code> → low severity', w: 'bulk enrichment of ~9.5k tracker domains without flooding the SIEM with criticals' },
+      { b: 'Asset join on the querying client', w: 'shows that it is Finance\'s tier-1 workstation doing the tunneling' },
+      { b: 'Filter + ECS packaging', w: 'normal lookups never reach the SIEM' },
+    ] },
+  { id: 'f_http', x: 1380, y: -100, kind: 'flink', color: C.flink, label: '<b>siem-‹id›-siem-http</b>\nfilter · 4 temporal joins · redact',
+    meta: { Statement: '<code>siem-&lt;id&gt;-siem-http</code>', SQL: '<code>flink/dml/12_siem_http.sql</code>', Reads: '<code>zeek_http</code> ⋈ <code>threat_intel</code> ×3 ⋈ <code>asset_inventory</code>', Writes: '<code>siem_events</code>' },
+    ops: [
+      { b: '<code>threat_intel</code> on host, registered domain and destination IP', w: '<b>IoC</b>: e.g. Python POSTs to <code>ptsv2.com</code>, which is <b>HTTP exfiltration</b>' },
+      { b: '<code>REGEXP</code> for SQLi / traversal / XSS / <code>/etc/passwd</code>', w: 'web attack detection' },
+      { b: '<code>REGEXP</code> for sqlmap / nikto / nmap / masscan user agents', w: 'offensive tooling' },
+      { b: '<code>REGEXP_REPLACE</code> with look-behinds on <code>password=, token=, email=…</code>', w: '<b>PII / secret redaction</b> in URLs before they leave Confluent' },
+    ] },
+  { id: 'f_sys', x: 1380, y: 20, kind: 'flink', color: C.flink, label: '<b>siem-‹id›-siem-syslog</b>\nfilter · 2 temporal joins · mask',
+    meta: { Statement: '<code>siem-&lt;id&gt;-siem-syslog</code>', SQL: '<code>flink/dml/13_siem_syslog.sql</code>', Reads: '<code>syslog_events</code> ⋈ <code>threat_intel</code> ⋈ <code>asset_inventory</code>', Writes: '<code>siem_events</code>', Volume: '~2,400/min in → ~20/min out' },
+    ops: [
+      { b: 'Drops routine ACCEPTs, background DROPs, cron, systemd, NTP, health checks, internal key logins, routine sudo', w: '<b>filter</b>: the bulk of SIEM licence cost, with no detection value' },
+      { b: 'Keeps <code>login_failed</code> / <code>invalid_user</code>', w: '<b>auth failures</b>, i.e. brute force and credential stuffing' },
+      { b: 'Keeps successful SSH from an external IP (severity 4)', w: 'attacker foothold after brute force' },
+      { b: 'Keeps firewall <b>ACCEPT</b> to a threat-intel IP', w: '<b>traffic bypassing</b> controls: C2 beacon allowed out' },
+      { b: 'Keeps DROP/REJECT from the internet to sensitive ports', w: '<b>sensitive port probing</b>' },
+      { b: 'Keeps useradd / usermod / suspicious sudo / MFA & password changes', w: 'persistence and account takeover' },
+      { b: '<code>CONCAT(\'user-\', SUBSTRING(SHA256(salt || user), 1, 12))</code>', w: '<b>pseudonymization</b>: stable and correlatable, but not reversible in the SIEM' },
+      { b: '6 chained <code>REGEXP_REPLACE</code> with look-arounds', w: '<b>PII redaction</b> of e-mails, user names and home dirs in free text (Flink treats replacements literally)' },
+    ] },
+  { id: 'f_met', x: 1380, y: 190, kind: 'flink', color: C.flink, label: '<b>siem-‹id›-volume-metrics</b>\n1-min TUMBLE windows · UNION ALL',
+    meta: { Statement: '<code>siem-&lt;id&gt;-volume-metrics</code>', SQL: '<code>flink/dml/20_volume_metrics.sql</code>', Reads: '<code>zeek_conn</code>, <code>zeek_dns</code>, <code>zeek_http</code>, <code>syslog_events</code>, <code>siem_events</code>', Writes: '<code>pipeline_metrics</code>' },
+    ops: [
+      { b: '<code>TUMBLE(TABLE x, DESCRIPTOR(event_time), INTERVAL \'1\' MINUTE)</code> + <code>COUNT(*)</code>', w: '<b>windowed aggregate</b> of events entering the pipeline (<code>stage = ingested</code>)' },
+      { b: 'Same window over <code>siem_events</code> grouped by <code>event.dataset</code>', w: 'events actually forwarded (<code>stage = siem</code>)' },
+      { b: 'Five aggregates merged with <code>UNION ALL</code>', w: 'feeds the live "SIEM volume reduction" tile (~96%)' },
+    ] },
+
+  /* ------------------------------------------------------------------ EGRESS TOPICS */
+  { id: 'e_siem', x: 1700, y: -160, kind: 'egress', color: C.egress, label: '<b>siem_events</b>\nAvro · nested ECS ROWs',
+    meta: { Topic: '<code>siem_events</code>', Created: 'Flink DDL <code>siem-&lt;id&gt;-ddl-siem-events</code>', Schema: 'Avro, nested <code>event, source, destination, network, user, host, threat, url</code>', Key: 'none (append-only)', Retention: '3 days', Writers: '4 SIEM routing statements' },
+    ops: [{ b: 'The only stream the SIEM sees', w: 'curated, enriched, masked, and ~4% of the original volume' }] },
+  { id: 'e_met', x: 1700, y: 190, kind: 'egress', color: C.egress, label: '<b>pipeline_metrics</b>\nAvro · per-minute counts',
+    meta: { Topic: '<code>pipeline_metrics</code>', Schema: 'Avro <code>metric_time, stage, dataset, event_count</code>', Retention: '3 days' },
+    ops: [{ b: 'Proof of value', w: 'the reduction % is computed from data, not claimed' }] },
+
+  /* ------------------------------------------------------------------ DESTINATIONS */
+  { id: 'd_connect', x: 2030, y: -160, kind: 'connect', color: C.connect, shape: 'box',
+    label: '<b>Kafka Connect 7.9</b>\nElasticsearch Sink connector 15.1\n<code>siem-elasticsearch-sink</code>',
+    meta: { Where: 'Laptop · Docker <code>connect</code> (self-managed, state in Confluent Cloud)', Group: '<code>siem-&lt;id&gt;-connect</code>', 'Internal topics': '<code>_siem-&lt;id&gt;-connect-configs/-offsets/-status</code>',
+            Topics: '<code>siem_events</code>, <code>pipeline_metrics</code>', Converter: 'AvroConverter (Schema Registry)', Config: '<code>docker/connect/elasticsearch-sink.json</code>' },
+    ops: [
+      { b: '<code>key.ignore=true</code>, <code>schema.ignore=true</code> + ES index templates', w: 'templates map <code>source.ip</code> as <code>ip</code>, <code>threat.geo_location</code> as <code>geo_point</code> and <code>event_time</code> as <code>date</code>' },
+      { b: '<code>errors.tolerance=all</code>, malformed docs → warn', w: 'one bad document never stops the SIEM feed' },
+    ] },
+  { id: 'd_es', x: 2400, y: -160, kind: 'elastic', color: C.elastic, shape: 'box',
+    label: '<b>Elasticsearch + Kibana 8.19</b>\nindices siem_events, pipeline_metrics\ndashboard "Confluent SIEM Optimization"',
+    meta: { Where: 'Laptop · Docker', Dashboard: '<code>http://localhost:5601/app/dashboards#/view/siem-optimization</code>', Source: '<code>docker/elastic/</code>' },
+    ops: [{ b: 'Analysts see pre-enriched alerts', w: 'faster detection: asset owner, criticality and threat name are already on the event' }] },
+  { id: 'd_tf', x: 2030, y: 230, kind: 'lake', color: C.lake, shape: 'box',
+    label: '<b>Tableflow</b>\nConfluent-managed storage\nApache Iceberg tables',
+    meta: { Tables: '<code>&lt;cluster-id&gt;.zeek_conn</code>, <code>.zeek_dns</code>, <code>.zeek_http</code>, <code>.syslog_events</code>', Format: 'Iceberg (managed storage)', Catalog: 'Iceberg REST <code>https://tableflow.&lt;region&gt;.&lt;cloud&gt;.confluent.cloud/iceberg/catalog/…</code>', Terraform: '<code>terraform/tableflow.tf</code>' },
+    ops: [{ b: 'Continuous topic → Iceberg materialization', w: '100% of logs, unmasked, kept at object-storage cost for forensics, compliance and threat hunting' }] },
+  { id: 'd_duck', x: 2400, y: 230, kind: 'lake', color: C.lake, shape: 'box',
+    label: '<b>DuckDB</b>\nlake-query · DuckDB UI :4213\nvia Iceberg REST catalog',
+    meta: { Scripts: '<code>scripts/03-lake-query.sh</code>, <code>scripts/06-duckdb-ui.sh</code>', Auth: 'Tableflow API key (OAuth2 client credentials, vended storage credentials)' },
+    ops: [{ b: 'Forensics on events the SIEM never received; governed re-identification', w: 'prove nothing was lost by filtering' }] },
+];
+
+const E = (from, to, label, type = 'data') => ({ from, to, label, type });
+const EDGES = [
+  E('zeek', 'fb', 'JSON files'), E('gen', 'fb', 'UDP 5140'),
+  E('fb', 't_conn_raw', 'produce'), E('fb', 't_dns_raw', 'produce'), E('fb', 't_http_raw', 'produce'), E('fb', 't_syslog_raw', 'produce'),
+  E('loader', 't_ti', 'Avro upsert'), E('loader', 't_asset', 'Avro upsert'),
+  E('t_conn_raw', 'f_norm', ''), E('t_dns_raw', 'f_norm', ''), E('t_http_raw', 'f_norm', ''), E('t_syslog_raw', 'f_norm', 'val BYTES'),
+  E('f_norm', 'g_conn', ''), E('f_norm', 'g_dns', ''), E('f_norm', 'g_http', ''), E('f_norm', 'g_syslog', 'INSERT'),
+  E('g_conn', 'f_net', ''), E('g_dns', 'f_dns', ''), E('g_http', 'f_http', ''), E('g_syslog', 'f_sys', ''),
+  E('t_ti', 'f_net', 'temporal join', 'lookup'), E('t_ti', 'f_dns', '', 'lookup'), E('t_ti', 'f_http', '', 'lookup'), E('t_ti', 'f_sys', '', 'lookup'),
+  E('t_asset', 'f_net', '', 'lookup'), E('t_asset', 'f_dns', '', 'lookup'), E('t_asset', 'f_http', '', 'lookup'), E('t_asset', 'f_sys', 'temporal join', 'lookup'),
+  E('f_net', 'e_siem', ''), E('f_dns', 'e_siem', ''), E('f_http', 'e_siem', ''), E('f_sys', 'e_siem', 'INSERT'),
+  E('g_conn', 'f_met', '', 'window'), E('g_dns', 'f_met', '', 'window'), E('g_http', 'f_met', '', 'window'), E('g_syslog', 'f_met', '', 'window'), E('e_siem', 'f_met', 'TUMBLE 1 min', 'window'),
+  E('f_met', 'e_met', ''),
+  E('e_siem', 'd_connect', 'consume'), E('e_met', 'd_connect', 'consume'), E('d_connect', 'd_es', 'bulk index'),
+  E('g_conn', 'd_tf', '', 'lake'), E('g_dns', 'd_tf', '', 'lake'), E('g_http', 'd_tf', '', 'lake'), E('g_syslog', 'd_tf', 'Tableflow', 'lake'),
+  E('d_tf', 'd_duck', 'REST catalog', 'lake'),
+  E('sr', 'g_syslog', 'schemas', 'schema'), E('sr', 't_ti', '', 'schema'), E('sr', 'e_siem', '', 'schema'), E('sr', 'd_connect', '', 'schema'),
+];
+
+/* ------------------------------------------------------------------ boundaries (drawn behind nodes) */
+const BOUNDARIES = [
+  { name: 'LAPTOP · DOCKER  (log sources & shipper)', color: C.laptop, nodes: ['zeek', 'gen', 'fb', 'loader'], pad: 40, dash: [6, 6] },
+  { name: 'CONFLUENT CLOUD · cluster siem-demo-<id>', color: C.cc, nodes: ['t_conn_raw', 't_ti', 't_asset', 'f_norm', 'g_conn', 'sr', 'f_net', 'f_met', 'e_siem', 'e_met', 'd_tf'], pad: 62, dash: [] },
+  { name: 'FLINK SQL · compute pool siem-<id>-pool', color: C.flink, nodes: ['f_norm', 'g_conn', 'g_syslog', 'f_net', 'f_sys', 'f_met'], pad: 30, dash: [4, 4] },
+  { name: 'CONFLUENT PLATFORM · Kafka Connect (laptop)', color: C.connect, nodes: ['d_connect'], pad: 26, dash: [4, 4] },
+  { name: 'ELASTIC SIEM (laptop)', color: C.elastic, nodes: ['d_es'], pad: 26, dash: [4, 4] },
+  { name: 'LAKEHOUSE · Iceberg', color: C.lake, nodes: ['d_tf', 'd_duck'], pad: 22, dash: [4, 4] },
+];
+
+/* ============================================================================================
+   Sample data: real records from this pipeline (shortened)
+   ============================================================================================ */
+const SCENARIOS = [
+  {
+    id: 'dns', name: 'DNS tunneling exfiltration (critical, kept)', kind: 'kept',
+    outcome: '<b>Kept → SIEM, critical.</b> A Finance tier-1 workstation sends ~76 base64-encoded lookups per minute to <code>mrhaha.net</code>. It matches threat intel on the <i>registered domain</i> and is enriched with its owner.',
+    steps: [
+      { node: 'zeek', t: 'Zeek writes a dns.log line', n: 'Captured from the replayed pcap.',
+        d: '{"ts":1791811094.56,"uid":"CsQ1fT2Wm3rLx8","id_orig_h":"192.168.1.185","id_orig_p":43673,"id_resp_h":"1.1.1.1","id_resp_p":53,"proto":"udp","query":"dghlie1hbmhhdhrvzxmsigjlbhrlzcbyb3vuzcbieqp3agfydmvzigfz.mrhaha.net","qtype_name":"A","rcode_name":"NXDOMAIN","rejected":false}' },
+      { node: 'fb', t: 'Fluent Bit adds sensor + @timestamp', n: 'No parsing logic in the agent.', d: '{ …same fields…, "sensor":"zeek-laptop-01", "@timestamp":"2026-10-13T14:04:54.565Z" }' },
+      { node: 't_dns_raw', t: 'zeek_dns_raw (schemaless)', n: 'Flink sees two BYTES columns.', d: 'key = NULL\nval = 0x7b227473223a313739313831...   (the JSON above as bytes)' },
+      { node: 'f_norm', t: 'Normalize: JSON → typed row', n: 'JSON_VALUE, LOWER, strip .localdomain, event_time = $rowtime.',
+        d: "INSERT INTO zeek_dns SELECT JSON_VALUE(j,'$.uid'), ingest_time, …,\n  REGEXP_REPLACE(LOWER(JSON_VALUE(j,'$.query')), '\\.localdomain$', ''), …" },
+      { node: 'g_dns', t: 'zeek_dns (Avro, governed)', n: 'Full-fidelity copy; also flows to Tableflow.',
+        d: '{"uid":"CsQ1fT2Wm3rLx8","event_time":"2026-10-13T14:04:54.565Z","src_ip":"192.168.1.185","dst_ip":"1.1.1.1","dst_port":53,"proto":"udp","query":"dghlie1hbm…ieqp3agfydmvzigfz.mrhaha.net","qtype_name":"A","rcode_name":"NXDOMAIN","raw_log":"{…}"}' },
+      { node: 't_ti', t: 'Temporal join: threat_intel AS OF event_time', n: 'Exact query misses; the registered domain (last two labels) hits.',
+        d: 'registered_domain = REGEXP_EXTRACT(query, \'([^.]+\\.[^.]+)$\', 1) = "mrhaha.net"\n→ {"indicator":"mrhaha.net","threat_category":"exfiltration","threat_name":"DNS tunneling exfiltration domain (base64 subdomains)","severity":"critical","confidence":95}' },
+      { node: 't_asset', t: 'Temporal join: asset_inventory on client IP', n: 'Who owns the box?', d: '{"asset_id":"192.168.1.185","hostname":"fin-ws-185","owner_team":"Finance Systems","department":"Finance","criticality":"tier1","os":"Ubuntu 18.04","zone":"corp"}' },
+      { node: 'f_dns', t: 'Rule + severity + ECS packaging', n: 'Rule "Threat intel match: exfiltration" (also first label ≥ 50 chars → tunneling). GREATEST(4, 3) = 4.', d: "rule_name = 'Threat intel match: exfiltration'   sev = 4 → 'critical'   kind = 'alert'" },
+      { node: 'e_siem', t: 'siem_events (Avro, nested ECS)', n: 'What the SIEM receives.',
+        d: '{"event_time":"2026-10-13T14:04:54.565Z","event":{"kind":"alert","category":"network","action":"dns_query","outcome":"failure","dataset":"zeek.dns","severity":4,"severity_label":"critical","rule":"Threat intel match: exfiltration"},"source":{"ip":"192.168.1.185","port":43673},"destination":{"ip":"1.1.1.1","port":53,"domain":"dghlie1hbm…mrhaha.net"},"host":{"ip":"192.168.1.185","name":"fin-ws-185","owner_team":"Finance Systems","criticality":"tier1"},"threat":{"matched":true,"indicator":"mrhaha.net","category":"exfiltration","name":"DNS tunneling exfiltration domain (base64 subdomains)","confidence":95,"feed":"demo-intel"},"observer":"zeek-laptop-01"}' },
+      { node: 'd_connect', t: 'Elasticsearch Sink connector', n: 'AvroConverter → JSON document, bulk-indexed.', d: 'PUT siem_events/_doc/siem_events+2+18234   (key.ignore → topic+partition+offset id)' },
+      { node: 'd_es', t: 'Kibana: critical alert on a tier-1 asset', n: 'Appears in "Tier-1 assets with high / critical events" and "Threat-intel matches".', d: 'event.rule: "Threat intel match: exfiltration" · host.name: fin-ws-185 · host.owner_team: Finance Systems' },
+      { node: 'd_tf', t: 'Meanwhile: the full row lands in Iceberg', n: 'zeek_dns via Tableflow (all lookups, not just alerts).', d: '<cluster-id>.zeek_dns  ← snapshot every few minutes' },
+      { node: 'd_duck', t: 'Forensics in DuckDB', n: 'Every lookup by the host, including ones the SIEM never saw.', d: "SELECT regexp_extract(query,'([^.]+\\.[^.]+)$',1) d, COUNT(*) FROM zeek_dns\nWHERE src_ip='192.168.1.185' GROUP BY 1 ORDER BY 2 DESC;\n→ mrhaha.net 8926 · ptsv2.com 14 · ubuntu.com 12" },
+    ] },
+  {
+    id: 'ssh', name: 'SSH brute force with PII masking (high, kept)', kind: 'kept',
+    outcome: '<b>Kept → SIEM, high.</b> An auth failure from a known botnet IP. The user name is <b>pseudonymized</b> and redacted from the message. The lake keeps the real name for governed investigation.',
+    steps: [
+      { node: 'gen', t: 'sshd emits a syslog line', n: 'Part of a 15–30 attempt burst every ~90 s.', d: '<84>Oct 13 14:05:02 bastion01 sshd[2231]: Failed password for invalid user admin from 203.0.113.45 port 40354 ssh2' },
+      { node: 'fb', t: 'Fluent Bit syslog-rfc3164 parser', n: 'Only splits the header; the message stays free text.', d: '{"pri":"84","time":"Oct 13 14:05:02","host":"bastion01","ident":"sshd","pid":"2231","message":"Failed password for invalid user admin from 203.0.113.45 port 40354 ssh2","@timestamp":"2026-10-13T14:05:02.567Z"}' },
+      { node: 't_syslog_raw', t: 'syslog_raw (schemaless)', n: '', d: 'val = {"pri":"84", … "message":"Failed password for invalid user admin from …"}' },
+      { node: 'f_norm', t: 'Normalize: REGEXP_EXTRACT on free text', n: 'event_type from app, action from message, user/IP/port extracted.',
+        d: "event_type = 'authentication'   action = 'login_failed'\nsrc_ip   = REGEXP_EXTRACT(msg, 'from ([0-9a-fA-F:.]+) port', 1) = '203.0.113.45'\nuser_name= REGEXP_EXTRACT(msg, 'for (invalid user )?([^ ]+) from', 2) = 'admin'\nfacility = 84/8 = 10 (authpriv)   severity = 84%8 = 4 (warning)" },
+      { node: 'g_syslog', t: 'syslog_events (Avro, unmasked)', n: 'Kept as-is for the lake.', d: '{"host":"bastion01","app":"sshd","event_type":"authentication","action":"login_failed","src_ip":"203.0.113.45","src_port":40354,"dst_port":22,"proto":"tcp","user_name":"admin","message":"Failed password for invalid user admin from 203.0.113.45 port 40354 ssh2"}' },
+      { node: 't_ti', t: 'Temporal join on remote IP', n: '', d: '{"indicator":"203.0.113.45","threat_category":"bruteforce","threat_name":"SSH credential-stuffing source (synthetic)","severity":"medium","country_iso":"BR","geo_location":"-23.5505,-46.6333"}' },
+      { node: 't_asset', t: 'Temporal join on hostname', n: 'Syslog knows the host by name, so the CMDB key is the hostname row.', d: '{"asset_id":"bastion01","ip":"10.10.10.5","owner_team":"Security Operations","criticality":"tier1","zone":"dmz"}' },
+      { node: 'f_sys', t: 'Rule, pseudonymize, redact', n: 'Rule "SSH authentication failure"; severity 2 (rule) vs 2 (intel).',
+        d: "user.name = CONCAT('user-', SUBSTRING(SHA256(salt || 'admin'), 1, 12)) = 'user-47071e3b4d9f'\nmessage   = REGEXP_REPLACE(msg, '[^ ]+(?= from [0-9a-fA-F:.]+ port)', '[USER]')\n          = 'Failed password for invalid user [USER] from 203.0.113.45 port 40354 ssh2'" },
+      { node: 'e_siem', t: 'siem_events', n: 'No real user name anywhere.',
+        d: '{"event":{"kind":"event","category":"authentication","action":"login_failed","outcome":"failure","dataset":"syslog","severity":2,"severity_label":"medium","rule":"SSH authentication failure"},"source":{"ip":"203.0.113.45","port":40354},"destination":{"port":22},"user":{"name":"user-47071e3b4d9f"},"host":{"ip":"10.10.10.5","name":"bastion01","owner_team":"Security Operations","criticality":"tier1","zone":"dmz"},"threat":{"matched":true,"indicator":"203.0.113.45","category":"bruteforce","country_iso_code":"BR","geo_location":"-23.5505,-46.6333"},"message":"Failed password for invalid user [USER] from 203.0.113.45 port 40354 ssh2"}' },
+      { node: 'd_connect', t: 'Sink connector', n: '', d: 'bulk index → siem_events' },
+      { node: 'd_es', t: 'Kibana', n: 'Correlate by the stable pseudonym; never see the real name.', d: 'user.name: user-47071e3b4d9f · source.ip: 203.0.113.45 · threat.category: bruteforce' },
+      { node: 'd_duck', t: 'Governed re-identification in the lake', n: 'Authorized analysts query the unmasked Iceberg table.', d: "SELECT user_name, src_ip, COUNT(*) FROM syslog_events\nWHERE action IN ('login_failed','invalid_user') GROUP BY 1,2;\n→ admin | 203.0.113.45 | 160" },
+    ] },
+  {
+    id: 'c2', name: 'C2 beacon allowed by the firewall (critical, kept)', kind: 'kept',
+    outcome: '<b>Kept → SIEM, critical.</b> The firewall <i>allowed</i> a connection to a known C2 server, so the traffic bypassed the control. Only threat-intel enrichment reveals it, because routine ACCEPTs are otherwise dropped.',
+    steps: [
+      { node: 'gen', t: 'Firewall log (iptables style)', n: '', d: '<6>Oct 13 14:04:39 fw01 kernel[911]: FW ACTION=ACCEPT IN=eth1 OUT=eth0 SRC=10.10.20.45 DST=198.51.100.23 PROTO=TCP SPT=17553 DPT=8443 LEN=545' },
+      { node: 'fb', t: 'Fluent Bit', n: '', d: '{"pri":"6","host":"fw01","ident":"kernel","message":"FW ACTION=ACCEPT … DST=198.51.100.23 … DPT=8443 …"}' },
+      { node: 'f_norm', t: 'Normalize', n: 'Key=value pairs extracted with REGEXP_EXTRACT.', d: "event_type='firewall' action='ACCEPT' src_ip='10.10.20.45' dst_ip='198.51.100.23' dst_port=8443 proto='tcp'" },
+      { node: 'g_syslog', t: 'syslog_events', n: '', d: '{"host":"fw01","event_type":"firewall","action":"ACCEPT","src_ip":"10.10.20.45","dst_ip":"198.51.100.23","dst_port":8443}' },
+      { node: 't_ti', t: 'Temporal join: remote side = dst_ip (src is internal)', n: '', d: '{"indicator":"198.51.100.23","threat_category":"c2","threat_name":"Cobalt Strike team server (synthetic)","severity":"critical","confidence":95,"country_iso":"RU"}' },
+      { node: 't_asset', t: 'Temporal join: internal side = src_ip', n: '', d: '{"asset_id":"10.10.20.45","hostname":"fin-laptop-045","department":"Finance","criticality":"tier2"}' },
+      { node: 'f_sys', t: 'Rule "Allowed traffic with threat-intel IP"', n: 'Evaluated before the noise rules; without the intel, this ACCEPT would be dropped.', d: 'sev = GREATEST(4 /*critical intel*/, 2 /*firewall*/) = 4 → alert' },
+      { node: 'e_siem', t: 'siem_events', n: '', d: '{"event":{"kind":"alert","category":"firewall","action":"ACCEPT","severity":4,"rule":"Allowed traffic with threat-intel IP"},"source":{"ip":"10.10.20.45"},"destination":{"ip":"198.51.100.23","port":8443},"host":{"name":"fin-laptop-045","department":"Finance"},"threat":{"category":"c2","name":"Cobalt Strike team server (synthetic)"}}' },
+      { node: 'd_connect', t: 'Sink connector', n: '', d: 'bulk index → siem_events' },
+      { node: 'd_es', t: 'Kibana', n: 'Shows in "Threat-intel matches" with the Finance laptop as the asset.', d: 'threat.name: Cobalt Strike team server (synthetic) · host.name: fin-laptop-045' },
+    ] },
+  {
+    id: 'noise', name: 'Routine firewall ACCEPT (noise, dropped)', kind: 'dropped',
+    outcome: '<b>Dropped from the SIEM, kept in the lake.</b> About 52% of all syslog is outbound web traffic like this. No rule matches, so <code>WHERE rule_name IS NOT NULL</code> filters it out. Tableflow still keeps it for long-term analytics.',
+    steps: [
+      { node: 'gen', t: 'Routine outbound HTTPS', n: '', d: '<6>Oct 13 14:06:11 fw01 kernel[911]: FW ACTION=ACCEPT IN=eth1 OUT=eth0 SRC=10.10.20.31 DST=142.250.80.46 PROTO=TCP SPT=51544 DPT=443 LEN=60' },
+      { node: 'fb', t: 'Fluent Bit', n: '', d: '{"host":"fw01","ident":"kernel","message":"FW ACTION=ACCEPT … DST=142.250.80.46 … DPT=443"}' },
+      { node: 'f_norm', t: 'Normalize', n: '', d: "event_type='firewall' action='ACCEPT' dst_ip='142.250.80.46' dst_port=443" },
+      { node: 'g_syslog', t: 'syslog_events', n: 'Stored with everything else.', d: '{"host":"fw01","event_type":"firewall","action":"ACCEPT","src_ip":"10.10.20.31","dst_ip":"142.250.80.46","dst_port":443}' },
+      { node: 't_ti', t: 'Temporal join: no indicator for 142.250.80.46', n: '', d: 'ti.indicator = NULL' },
+      { node: 'f_sys', t: 'No rule matches → filtered', n: 'Not an auth event, not a sensitive-port DROP, not an IoC.', d: 'rule_name = NULL  →  WHERE rule_name IS NOT NULL  →  ✗ not forwarded' },
+      { node: 'd_tf', t: 'Tableflow keeps it', n: 'Cheap, queryable history.', d: '<cluster-id>.syslog_events  (every firewall decision)' },
+      { node: 'd_duck', t: 'Long-term analytics in DuckDB', n: '', d: "SELECT date_trunc('hour', event_time), action, COUNT(*) FROM syslog_events\nWHERE event_type='firewall' GROUP BY 1,2;\n→ 06:00 ACCEPT 81704 · DROP 12921" },
+    ] },
+  {
+    id: 'pii', name: 'Password reset with e-mail (PII redaction)', kind: 'kept',
+    outcome: '<b>Kept → SIEM, low.</b> The account change is security-relevant, but the e-mail address is personal data. It is pseudonymized in <code>user.name</code> and redacted to <code>[EMAIL]</code> in the message.',
+    steps: [
+      { node: 'gen', t: 'Account-service log', n: '', d: '<133>Oct 13 14:05:07 app01 account-service[4410]: password reset requested for bob.smith@acme-corp.example from 10.10.20.45' },
+      { node: 'f_norm', t: 'Normalize', n: '', d: "event_type='account' action='password_reset' user_name='bob.smith@acme-corp.example' src_ip='10.10.20.45'" },
+      { node: 'g_syslog', t: 'syslog_events (unmasked)', n: '', d: '{"host":"app01","event_type":"account","action":"password_reset","user_name":"bob.smith@acme-corp.example","message":"password reset requested for bob.smith@acme-corp.example from 10.10.20.45"}' },
+      { node: 'f_sys', t: 'Mask', n: 'Salted hash + regex redaction.', d: "user.name = 'user-63a37228d004'\nmessage   = REGEXP_REPLACE(msg, '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}', '[EMAIL]')\n          = 'password reset requested for [EMAIL] from 10.10.20.45'" },
+      { node: 'e_siem', t: 'siem_events', n: '', d: '{"event":{"category":"account","action":"password_reset","severity":1,"rule":"Account security change"},"user":{"name":"user-63a37228d004"},"host":{"name":"app01","owner_team":"Identity Services","criticality":"tier1"},"message":"password reset requested for [EMAIL] from 10.10.20.45"}' },
+      { node: 'd_es', t: 'Kibana', n: 'No e-mail address is stored in the SIEM.', d: 'message: password reset requested for [EMAIL] from 10.10.20.45' },
+    ] },
+  {
+    id: 'exfil', name: '55 MB raw-TCP exfiltration (long connection)', kind: 'kept',
+    outcome: '<b>Kept → SIEM, critical.</b> The connection never ends while the pcap loops. <code>long-connections.zeek</code> emits an interim record every 5 MB, and each one matches the IoC <code>109.238.11.185</code>.',
+    steps: [
+      { node: 'zeek', t: 'Interim conn record (5 MB crossed)', n: 'Same uid, growing byte counts, about 12 per 42-min loop.', d: '{"uid":"CEuiMy4JByJTKO048c","id_orig_h":"109.238.11.185","id_resp_h":"192.168.1.214","id_resp_p":53334,"proto":"tcp","orig_bytes":24326508,"resp_bytes":1132083,"duration":725,"conn_state":"OTH","local_orig":false,"local_resp":true}' },
+      { node: 'fb', t: 'Fluent Bit', n: '', d: '{ …, "sensor":"zeek-laptop-01" }' },
+      { node: 'f_norm', t: 'Normalize', n: '', d: 'TRY_CAST(JSON_VALUE(j,\'$.orig_bytes\') AS BIGINT) = 24326508' },
+      { node: 'g_conn', t: 'zeek_conn', n: '', d: '{"uid":"CEuiMy4JByJTKO048c","src_ip":"109.238.11.185","dst_ip":"192.168.1.214","dst_port":53334,"orig_bytes":24326508,"local_orig":false,"local_resp":true}' },
+      { node: 't_ti', t: 'Temporal join: remote_ip = src_ip (originator is external)', n: '', d: '{"indicator":"109.238.11.185","threat_category":"exfiltration","threat_name":"Bulk data exfiltration endpoint seen in training capture","severity":"critical"}' },
+      { node: 't_asset', t: 'Temporal join: local_ip = dst_ip', n: '', d: '{"asset_id":"192.168.1.214","hostname":"rnd-cad-214","owner_team":"R&D Systems","criticality":"tier1"}' },
+      { node: 'f_net', t: 'Rule "Threat intel match: exfiltration"', n: 'network.bytes = orig + resp.', d: "sev = 4  · network.bytes = 25458591" },
+      { node: 'e_siem', t: 'siem_events', n: '', d: '{"event":{"kind":"alert","category":"network","dataset":"zeek.conn","severity":4,"rule":"Threat intel match: exfiltration"},"source":{"ip":"109.238.11.185"},"destination":{"ip":"192.168.1.214","port":53334},"network":{"transport":"tcp","bytes":25458591},"host":{"name":"rnd-cad-214","criticality":"tier1"},"message":"conn 109.238.11.185:51101 -> 192.168.1.214:53334 tcp sent=24326508 recv=1132083 OTH"}' },
+      { node: 'd_es', t: 'Kibana', n: 'Shows as zeek.conn in "SIEM events over time by source".', d: 'event.dataset: zeek.conn · threat.category: exfiltration' },
+    ] },
+  {
+    id: 'metrics', name: 'Volume-reduction metric (windowed aggregate)', kind: 'metric',
+    outcome: '<b>Computed in Flink.</b> 1-minute tumbling windows count events ingested and events forwarded. Kibana divides them to show the live reduction (~96%).',
+    steps: [
+      { node: 'g_syslog', t: 'All normalized events (ingested)', n: 'Counted per minute on event_time.', d: 'TUMBLE(TABLE syslog_events, DESCRIPTOR(event_time), INTERVAL \'1\' MINUTE)  → COUNT(*) = 2354' },
+      { node: 'g_dns', t: '…same for zeek_conn / zeek_dns / zeek_http', n: '', d: 'zeek.conn 304 · zeek.dns 291 · zeek.http 10' },
+      { node: 'e_siem', t: 'Forwarded events', n: 'Grouped by event.dataset.', d: 'siem: zeek.dns 107 · syslog 53 · zeek.http 2' },
+      { node: 'f_met', t: 'UNION ALL of five windowed aggregates', n: 'Emitted when the watermark passes window end + 5 s.', d: "SELECT window_time, 'ingested', 'syslog', COUNT(*) FROM TABLE(TUMBLE(...)) GROUP BY window_start, window_end, window_time\nUNION ALL …" },
+      { node: 'e_met', t: 'pipeline_metrics', n: '', d: '{"metric_time":"2026-10-12T14:09:59.999Z","stage":"ingested","dataset":"syslog","event_count":2354}\n{"metric_time":"2026-10-12T14:09:59.999Z","stage":"siem","dataset":"zeek.dns","event_count":107}' },
+      { node: 'd_connect', t: 'Sink connector', n: '', d: 'bulk index → pipeline_metrics' },
+      { node: 'd_es', t: 'Kibana formula', n: '', d: "1 - sum(event_count, kql='stage:\"siem\"') / sum(event_count, kql='stage:\"ingested\"')  →  96.8 %" },
+    ] },
+];
+
+/* ============================================================================================
+   Rendering
+   ============================================================================================ */
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+const KIND_NAME = { source: 'Source · laptop', topic: 'Ingestion topic · Kafka', ref: 'Reference topic · Flink upsert table', flink: 'Flink SQL statement',
+  gov: 'Governed topic · Flink table', sr: 'Confluent Schema Registry', egress: 'Egress topic · Kafka', connect: 'Kafka Connect · Confluent',
+  elastic: 'SIEM destination', lake: 'Tableflow / lakehouse' };
+
+const FONT = { multi: 'html', face: 'Inter', size: 14, color: '#e6edf6',
+  bold: { face: 'Inter', size: 15, color: '#ffffff', mod: 'bold' },
+  code: { face: 'JetBrains Mono', size: 12, color: '#cfe3ff', mod: '' } };
+function nodeStyle(n, alpha = 1) {
+  const isFlink = n.kind === 'flink';
+  const dim = alpha < 1;
+  return {
+    color: { background: hexA(n.color, isFlink ? .16 * alpha : .12 * alpha), border: hexA(n.color, alpha),
+             highlight: { background: hexA(n.color, .3), border: n.color }, hover: { background: hexA(n.color, .22), border: n.color } },
+    font: { ...FONT, color: dim ? 'rgba(230,237,246,.22)' : '#e6edf6',
+            bold: { ...FONT.bold, color: dim ? 'rgba(255,255,255,.25)' : '#ffffff' },
+            code: { ...FONT.code, color: dim ? 'rgba(207,227,255,.25)' : '#cfe3ff' } },
+    borderWidth: isFlink ? 2 : 1.5,
+  };
+}
+
+const nodes = new vis.DataSet(NODES.map(n => ({
+  id: n.id, x: n.x, y: n.y, label: n.label, shape: n.shape || 'box',
+  title: undefined,
+  margin: { top: 10, bottom: 10, left: 12, right: 12 },
+  widthConstraint: { minimum: n.kind === 'flink' ? 230 : 190, maximum: ['connect', 'elastic', 'lake'].includes(n.kind) ? 270 : 250 },
+  shapeProperties: { borderRadius: n.kind === 'flink' ? 10 : 8 },
+  shadow: { enabled: true, color: hexA(n.color, .25), size: 14, x: 0, y: 0 },
+  ...nodeStyle(n),
+})));
+
+const EDGE_STYLE = {
+  data:   { color: '#7c8aa5', dashes: false, width: 1.6 },
+  lookup: { color: C.ref,     dashes: [6, 5], width: 1.4 },
+  window: { color: C.flink,   dashes: [2, 4], width: 1.3 },
+  lake:   { color: C.lake,    dashes: [8, 4], width: 1.5 },
+  schema: { color: C.sr,      dashes: [1, 5], width: 1.1 },
+};
+const edges = new vis.DataSet(EDGES.map((e, i) => ({
+  id: 'e' + i, from: e.from, to: e.to, label: e.label || undefined, type: e.type,
+  arrows: { to: { enabled: true, scaleFactor: .55 } },
+  smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: .45 },
+  color: { color: hexA(EDGE_STYLE[e.type].color, e.type === 'data' ? .75 : .5), highlight: EDGE_STYLE[e.type].color, hover: EDGE_STYLE[e.type].color },
+  dashes: EDGE_STYLE[e.type].dashes, width: EDGE_STYLE[e.type].width,
+  font: { color: '#93a1b6', size: 10.5, face: 'Inter', strokeWidth: 3, strokeColor: '#0b0f17', align: 'middle' },
+})));
+
+const container = document.getElementById('network');
+const network = new vis.Network(container, { nodes, edges }, {
+  physics: false,
+  interaction: { hover: true, dragNodes: true, dragView: true, zoomView: true, multiselect: false, navigationButtons: false, keyboard: false, tooltipDelay: 200 },
+  layout: { improvedLayout: false },
+  nodes: { chosen: true },
+  edges: { selectionWidth: 1.2, hoverWidth: .6 },
+});
+
+/* boundaries + column headers, drawn in network space so they pan / zoom / follow dragged nodes */
+network.on('beforeDrawing', ctx => {
+  const boxes = {};
+  for (const b of BOUNDARIES) {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const id of b.nodes) {
+      const bb = network.getBoundingBox(id);
+      if (!bb) continue;
+      x1 = Math.min(x1, bb.left); y1 = Math.min(y1, bb.top); x2 = Math.max(x2, bb.right); y2 = Math.max(y2, bb.bottom);
+    }
+    if (!isFinite(x1)) continue;
+    x1 -= b.pad; y1 -= b.pad + 18; x2 += b.pad; y2 += b.pad;
+    boxes[b.name] = [x1, y1, x2, y2];
+    ctx.save();
+    roundRect(ctx, x1, y1, x2 - x1, y2 - y1, 18);
+    ctx.fillStyle = hexA(b.color, b.name.startsWith('CONFLUENT CLOUD') ? .045 : .06);
+    ctx.fill();
+    ctx.setLineDash(b.dash); ctx.lineWidth = b.name.startsWith('CONFLUENT CLOUD') ? 2 : 1.2;
+    ctx.strokeStyle = hexA(b.color, .65); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '600 12px Inter, sans-serif'; ctx.fillStyle = hexA(b.color, .95);
+    ctx.fillText(b.name, x1 + 14, y1 + 20);
+    ctx.restore();
+  }
+  // column headers
+  let top = Infinity;
+  NODES.forEach(n => { const bb = network.getBoundingBox(n.id); if (bb) top = Math.min(top, bb.top); });
+  ctx.save();
+  ctx.font = '700 15px Inter, sans-serif'; ctx.textAlign = 'center';
+  COLUMNS.forEach((c, i) => {
+    ctx.fillStyle = 'rgba(230,237,246,.9)';
+    ctx.fillText(c.name, c.x, top - 120);
+    ctx.fillStyle = 'rgba(147,161,182,.75)'; ctx.font = '500 11.5px Inter, sans-serif';
+    ctx.fillText(['laptop · Docker', 'Kafka topics', 'Confluent Cloud for Apache Flink', 'Kafka topics', 'SIEM · lakehouse'][i], c.x, top - 100);
+    ctx.font = '700 15px Inter, sans-serif';
+    if (i < COLUMNS.length - 1) {
+      ctx.strokeStyle = 'rgba(91,106,128,.6)'; ctx.lineWidth = 1.5; ctx.beginPath();
+      const mid = (c.x + COLUMNS[i + 1].x) / 2; ctx.moveTo(mid - 14, top - 105); ctx.lineTo(mid + 14, top - 105);
+      ctx.lineTo(mid + 8, top - 110); ctx.moveTo(mid + 14, top - 105); ctx.lineTo(mid + 8, top - 100); ctx.stroke();
+    }
+  });
+  ctx.restore();
+});
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+/* ------------------------------------------------------------------ legend */
+document.getElementById('legend').innerHTML = [
+  ['Laptop source', C.laptop], ['Kafka topic', C.kafka], ['Reference (upsert) table', C.ref], ['Flink statement', C.flink],
+  ['Governed topic', C.gov], ['Egress topic', C.egress], ['Kafka Connect', C.connect], ['Elastic SIEM', C.elastic], ['Tableflow / Iceberg', C.lake], ['Schema Registry', C.sr],
+].map(([t, c]) => `<span><i style="background:${hexA(c, .35)};border:1px solid ${c}"></i>${t}</span>`).join('') +
+  `<span><span class="ln" style="border-color:#7c8aa5"></span>data</span>` +
+  `<span><span class="ln" style="border-color:${C.ref};border-top-style:dashed"></span>temporal join</span>` +
+  `<span><span class="ln" style="border-color:${C.flink};border-top-style:dotted"></span>window input</span>` +
+  `<span><span class="ln" style="border-color:${C.lake};border-top-style:dashed"></span>Tableflow</span>`;
+
+/* ------------------------------------------------------------------ details pane */
+const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+function stripHtml(s) { return s.replace(/<[^>]+>/g, ''); }
+function showDetails(id) {
+  const n = byId[id]; if (!n) return;
+  const plain = t => stripHtml(t).replace(/[‹]/g, '<').replace(/[›]/g, '>');
+  const title = plain(n.label.split('\n')[0]);
+  const sub = n.label.split('\n').slice(1).map(plain).join(' · ');
+  const meta = Object.entries(n.meta || {}).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const ops = (n.ops || []).map(o => `<li><b>${o.b}</b><span class="why">${o.w}</span></li>`).join('');
+  document.getElementById('pane-details').innerHTML = `
+    <div class="kicker" style="color:${n.color}">${KIND_NAME[n.kind]}</div>
+    <div class="title">${escapeHtml(title)}</div>
+    <div class="sub">${escapeHtml(sub)}</div>
+    <dl class="meta">${meta}</dl>
+    ${ops ? `<h3>${n.kind === 'flink' ? 'Transformations, and why' : 'What happens here, and why'}</h3><ul class="ops">${ops}</ul>` : ''}
+    ${scenariosFor(id)}`;
+  document.querySelectorAll('[data-run]').forEach(b => b.onclick = () => { selectScenario(b.dataset.run); switchTab('trace'); });
+  switchTab('details');
+}
+function scenariosFor(id) {
+  const list = SCENARIOS.filter(s => s.steps.some(st => st.node === id));
+  if (!list.length) return '';
+  return `<h3>Sample records through this node</h3>` + list.map(s =>
+    `<button data-run="${s.id}" style="display:block;width:100%;text-align:left;margin-bottom:6px">▶ ${s.name}</button>`).join('');
+}
+function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+network.on('click', p => { if (p.nodes.length) showDetails(p.nodes[0]); });
+
+/* ------------------------------------------------------------------ tabs */
+function switchTab(t) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + t));
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+
+/* ------------------------------------------------------------------ sample data tracing */
+const sel1 = document.getElementById('scenario'), sel2 = document.getElementById('scenario2');
+[sel1, sel2].forEach(sel => SCENARIOS.forEach(s => sel.add(new Option(s.name, s.id))));
+let current = null, stepIdx = 0, playTimer = null;
+
+function pretty(d) {
+  const t = d.trim();
+  let out;
+  if (t.startsWith('{') && !t.includes('\n')) {
+    try { out = JSON.stringify(JSON.parse(t), null, 2); } catch { out = d; }
+  } else out = d;
+  out = escapeHtml(out);
+  out = out.replace(/(&quot;|")((?:[^"\\]|\\.)*?)("\s*:)/g, '<span class="j-key">"$2"</span>:')
+           .replace(/:\s*"((?:[^"\\]|\\.)*?)"/g, ': <span class="j-str">"$1"</span>')
+           .replace(/:\s*(-?\d+(?:\.\d+)?)(?=[,\n}\s])/g, ': <span class="j-num">$1</span>')
+           .replace(/:\s*(true|false)/g, ': <span class="j-bool">$1</span>')
+           .replace(/:\s*null/g, ': <span class="j-null">null</span>')
+           .replace(/(\[USER\]|\[EMAIL\]|user-[0-9a-f]{12}|mrhaha\.net|Threat intel match: [a-z-]+)/g, '<span class="hl">$1</span>');
+  return out;
+}
+
+function selectScenario(id) {
+  current = SCENARIOS.find(s => s.id === id); stepIdx = 0;
+  sel1.value = sel2.value = id;
+  renderTrace(); highlightPath(); goStep(0);
+}
+function renderTrace() {
+  const s = current;
+  document.getElementById('traceBody').innerHTML = `
+    <div class="outcome ${s.kind}">${s.outcome}</div>
+    <div class="stepnav">
+      <button id="bPrev">◀ Prev</button><button id="bPlay">▶ Play</button><button id="bNext">Next ▶</button>
+      <span class="count" id="stepCount"></span>
+    </div>
+    <ol class="steps">${s.steps.map((st, i) => `
+      <li data-i="${i}">
+        <div class="st"><span>${escapeHtml(st.t)}</span></div>
+        ${st.n ? `<div class="note">${st.n}</div>` : ''}
+        <pre class="data">${pretty(st.d)}</pre>
+      </li>`).join('')}</ol>`;
+  document.querySelectorAll('ol.steps li').forEach(li => li.onclick = () => { stopPlay(); goStep(+li.dataset.i); });
+  document.getElementById('bPrev').onclick = () => { stopPlay(); goStep(stepIdx - 1); };
+  document.getElementById('bNext').onclick = () => { stopPlay(); goStep(stepIdx + 1); };
+  document.getElementById('bPlay').onclick = togglePlay;
+}
+function goStep(i) {
+  if (!current) return;
+  stepIdx = Math.max(0, Math.min(current.steps.length - 1, i));
+  document.querySelectorAll('ol.steps li').forEach((li, j) => li.classList.toggle('active', j === stepIdx));
+  document.getElementById('stepCount').textContent = `${stepIdx + 1} / ${current.steps.length}`;
+  document.getElementById('bPrev').disabled = stepIdx === 0;
+  document.getElementById('bNext').disabled = stepIdx === current.steps.length - 1;
+  // scroll the active step into view below the pinned nav bar
+  const li = document.querySelector(`ol.steps li[data-i="${stepIdx}"]`);
+  if (li) {
+    const pane = document.getElementById('pane-trace'), nav = document.querySelector('.stepnav');
+    const liTop = li.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+    const navH = nav ? nav.offsetHeight : 0;
+    if (liTop - navH < pane.scrollTop || liTop + li.offsetHeight > pane.scrollTop + pane.clientHeight)
+      pane.scrollTo({ top: Math.max(0, liTop - navH - 8), behavior: 'smooth' });
+  }
+  const nodeId = current.steps[stepIdx].node;
+  network.selectNodes([nodeId], false);
+  network.focus(nodeId, { scale: Math.max(network.getScale(), .75), animation: { duration: 550, easingFunction: 'easeInOutQuad' }, offset: { x: -40, y: 0 } });
+  pulse(nodeId);
+}
+function togglePlay() {
+  if (playTimer) return stopPlay();
+  document.getElementById('bPlay').textContent = '⏸ Pause';
+  if (stepIdx >= current.steps.length - 1) goStep(0);
+  playTimer = setInterval(() => { if (stepIdx >= current.steps.length - 1) return stopPlay(); goStep(stepIdx + 1); }, 2200);
+}
+function stopPlay() { clearInterval(playTimer); playTimer = null; const b = document.getElementById('bPlay'); if (b) b.textContent = '▶ Play'; }
+
+function highlightPath() {
+  const onPath = new Set(current.steps.map(s => s.node));
+  // edges between consecutive path nodes (in either step order) stay bright
+  const pathPairs = new Set();
+  const seq = current.steps.map(s => s.node);
+  for (let i = 0; i < seq.length; i++) for (let j = i + 1; j < seq.length; j++) { pathPairs.add(seq[i] + '>' + seq[j]); pathPairs.add(seq[j] + '>' + seq[i]); }
+  nodes.update(NODES.map(n => ({ id: n.id, ...nodeStyle(n, onPath.has(n.id) ? 1 : .18) })));
+  edges.update(edges.get().map(e => {
+    const st = EDGE_STYLE[e.type]; const on = onPath.has(e.from) && onPath.has(e.to) && pathPairs.has(e.from + '>' + e.to);
+    return { id: e.id, color: { color: on ? st.color : hexA(st.color, .08), highlight: st.color }, width: on ? st.width + 1.4 : st.width,
+             font: { color: on ? '#cbd5e1' : 'rgba(147,161,182,.12)', strokeColor: '#0b0f17' } };
+  }));
+}
+function clearHighlight() {
+  stopPlay(); current = null;
+  nodes.update(NODES.map(n => ({ id: n.id, ...nodeStyle(n, 1) })));
+  edges.update(edges.get().map(e => { const st = EDGE_STYLE[e.type];
+    return { id: e.id, color: { color: hexA(st.color, e.type === 'data' ? .75 : .5), highlight: st.color }, width: st.width, font: { color: '#93a1b6', strokeColor: '#0b0f17' } }; }));
+  network.unselectAll();
+  document.getElementById('traceBody').innerHTML = '<p class="empty">Pick a scenario above to follow one real record end to end.</p>';
+}
+function pulse(id) {
+  const n = byId[id]; let k = 0;
+  const t = setInterval(() => {
+    nodes.update({ id, shadow: { enabled: true, color: hexA(n.color, k % 2 ? .25 : .9), size: k % 2 ? 14 : 34, x: 0, y: 0 } });
+    if (++k > 5) clearInterval(t);
+  }, 160);
+}
+
+sel1.onchange = () => selectScenario(sel1.value);
+sel2.onchange = () => selectScenario(sel2.value);
+document.getElementById('btnTrace').onclick = () => { selectScenario(sel1.value); switchTab('trace'); };
+document.getElementById('btnClear').onclick = clearHighlight;
+document.getElementById('btnFit').onclick = () => fitAll(true);
+document.getElementById('btnReset').onclick = () => {
+  NODES.forEach(n => network.moveNode(n.id, n.x, n.y)); network.redraw(); fitAll(true);
+};
+document.getElementById('chkLabels').onchange = e => {
+  edges.update(EDGES.map((ed, i) => ({ id: 'e' + i, label: e.target.checked && ed.label ? ed.label : ' ' })));
+};
+
+clearHighlight();
+function fitAll(animate) {
+  network.fit({ animation: false });
+  const s = network.getScale() * 0.97;
+  network.moveTo({ position: { x: 1170, y: 40 }, scale: s, animation: animate ? { duration: 500 } : false });
+}
+network.once('afterDrawing', () => fitAll(false));
+
+/* deep links: #trace=dns  or  #node=f_sys */
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get('trace')) setTimeout(() => { selectScenario(hash.get('trace')); switchTab('trace'); if (hash.get('step')) goStep(+hash.get('step')); }, 300);
+if (hash.get('node')) setTimeout(() => showDetails(hash.get('node')), 300);
+</script>
+</body>
+</html>

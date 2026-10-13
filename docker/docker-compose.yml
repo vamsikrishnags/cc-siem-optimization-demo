@@ -1,0 +1,181 @@
+# Laptop side of the Confluent SIEM optimization demo.
+#
+#   zeek ──(JSON files)──┐
+#                         ├─► fluent-bit ──► Confluent Cloud raw topics ──► Flink ──► siem_events ──► connect ──► elasticsearch/kibana
+#   syslog-generator ─UDP─┘                                                    └──► Tableflow ──► Iceberg (Confluent-managed) ◄── lake-query
+#
+# docker/.env is written by scripts/01-provision-cloud.sh from Terraform outputs.
+name: siem-demo
+
+x-kafka-env: &kafka-env
+  DEMO_ID: ${DEMO_ID:-local}
+  KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP}
+  KAFKA_API_KEY: ${KAFKA_API_KEY}
+  KAFKA_API_SECRET: ${KAFKA_API_SECRET}
+  KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+  SCHEMA_REGISTRY_URL: ${SCHEMA_REGISTRY_URL}
+  SCHEMA_REGISTRY_API_KEY: ${SCHEMA_REGISTRY_API_KEY}
+  SCHEMA_REGISTRY_API_SECRET: ${SCHEMA_REGISTRY_API_SECRET}
+
+services:
+  # ---------------------------------------------------------------- SIEM (Elastic)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      ES_JAVA_OPTS: -Xms768m -Xmx768m
+    mem_limit: 1600m
+    ports: ["9200:9200"]
+    volumes: [es-data:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      retries: 30
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.21
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      SERVER_PUBLICBASEURL: http://localhost:5601
+      TELEMETRY_OPTIN: "false"
+      TELEMETRY_ALLOWCHANGINGOPTINSTATUS: "false"
+      XPACK_SECURITY_SHOWINSECURECLUSTERWARNING: "false"
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: confluent-siem-optimization-demo-key-32
+    mem_limit: 1200m
+    ports: ["5601:5601"]
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 10s
+      retries: 60
+
+  # ---------------------------------------------------------------- Kafka Connect (self-managed, state in Confluent Cloud)
+  connect:
+    build: ./connect
+    image: siem-demo/connect:latest
+    mem_limit: 1200m
+    ports: ["8083:8083"]
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP}
+      # demo id in the group / internal topic names keeps several demo runs apart on one cluster
+      CONNECT_GROUP_ID: siem-${DEMO_ID:-local}-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _siem-${DEMO_ID:-local}-connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _siem-${DEMO_ID:-local}-connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _siem-${DEMO_ID:-local}-connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: ${CONNECT_REPLICATION_FACTOR:-3}
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: ${CONNECT_REPLICATION_FACTOR:-3}
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: ${CONNECT_REPLICATION_FACTOR:-3}
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.converters.ByteArrayConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      CONNECT_LOG4J_LOGGERS: org.apache.kafka.connect.runtime.rest=WARN,org.reflections=ERROR
+      # Confluent Cloud auth for the worker, its sink consumers and producers
+      CONNECT_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      CONNECT_SASL_MECHANISM: PLAIN
+      CONNECT_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_API_KEY}" password="${KAFKA_API_SECRET}";
+      CONNECT_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: https
+      CONNECT_CONSUMER_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
+      CONNECT_CONSUMER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_API_KEY}" password="${KAFKA_API_SECRET}";
+      CONNECT_PRODUCER_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
+      CONNECT_PRODUCER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_API_KEY}" password="${KAFKA_API_SECRET}";
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx768m
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
+      retries: 30
+
+  # One-shot: ES index templates, Kibana dashboard, Elasticsearch sink connector
+  siem-setup:
+    build: ./tools
+    image: siem-demo/tools:latest
+    command: ["python", "setup_siem.py"]
+    environment:
+      <<: *kafka-env
+      VALUE_CONVERTER: ${SINK_VALUE_CONVERTER:-io.confluent.connect.avro.AvroConverter}
+    volumes:
+      - ./elastic:/config/elastic:ro
+      - ./elastic/kibana:/config/kibana:ro
+      - ./connect:/config/connect:ro
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+      kibana: { condition: service_healthy }
+      connect: { condition: service_healthy }
+    restart: "no"
+
+  # ---------------------------------------------------------------- reference data (threat intel, CMDB)
+  reference-loader:
+    image: siem-demo/tools:latest
+    build: ./tools
+    command: ["python", "reference_loader.py", "load"]
+    environment:
+      <<: *kafka-env
+      WATCHLIST_URL: ${WATCHLIST_URL:-}
+    restart: "no"
+
+  # ---------------------------------------------------------------- log sources + shipper
+  zeek:
+    build: ./zeek
+    image: siem-demo/zeek:latest
+    cap_add: [NET_ADMIN, NET_RAW]
+    mem_limit: 700m
+    environment:
+      PCAP_REPLAY_MULTIPLIER: ${PCAP_REPLAY_MULTIPLIER:-1}
+    volumes:
+      - ../data/pcaps:/pcaps:ro
+      - zeek-logs:/logs
+    depends_on:
+      reference-loader: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  fluent-bit:
+    image: fluent/fluent-bit:5.1.2
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.yaml"]
+    mem_limit: 256m
+    environment:
+      <<: *kafka-env
+      SENSOR_NAME: zeek-laptop-01
+    ports: ["2020:2020"]
+    volumes:
+      - ./fluent-bit/fluent-bit.yaml:/fluent-bit/etc/fluent-bit.yaml:ro
+      - zeek-logs:/zeek-logs:ro
+      - fluent-bit-state:/fluent-bit/state
+    restart: unless-stopped
+
+  syslog-generator:
+    image: siem-demo/tools:latest
+    build: ./tools
+    command: ["python", "syslog_generator.py"]
+    mem_limit: 128m
+    environment:
+      SYSLOG_HOST: fluent-bit
+      SYSLOG_PORT: "5140"
+      SYSLOG_EVENTS_PER_SEC: ${SYSLOG_EVENTS_PER_SEC:-40}
+    depends_on:
+      fluent-bit: { condition: service_started }
+      reference-loader: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- on demand: query the Tableflow Iceberg tables
+  lake-query:
+    image: siem-demo/tools:latest
+    build: ./tools
+    profiles: ["tools"]
+    command: ["python", "lake_query.py"]
+    environment:
+      TABLEFLOW_CATALOG_ENDPOINT: ${TABLEFLOW_CATALOG_ENDPOINT}
+      TABLEFLOW_API_KEY: ${TABLEFLOW_API_KEY}
+      TABLEFLOW_API_SECRET: ${TABLEFLOW_API_SECRET}
+      KAFKA_CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+
+volumes:
+  es-data:
+  zeek-logs:
+  fluent-bit-state:

@@ -1,0 +1,22 @@
+ip,hostname,owner_team,department,criticality,os,zone
+192.168.1.1,office-gw01,Network Engineering,IT,tier1,RouterOS,corp
+192.168.1.10,eng-ws-010,Platform Engineering,Engineering,tier2,Windows 10,corp
+192.168.1.15,mkt-laptop-015,Marketing Ops,Marketing,tier3,Windows 10,corp
+192.168.1.100,print-srv-100,IT Service Desk,IT,tier3,Windows Server 2016,corp
+192.168.1.109,conf-room-109,IT Service Desk,IT,tier3,Android TV,guest
+192.168.1.143,sales-laptop-143,Sales Ops,Sales,tier3,Windows 10,corp
+192.168.1.185,fin-ws-185,Finance Systems,Finance,tier1,Ubuntu 18.04,corp
+192.168.1.187,dev-mac-187,Product Engineering,Engineering,tier2,macOS 10.11,corp
+192.168.1.214,rnd-cad-214,R&D Systems,Research,tier1,Windows 10,corp
+10.10.0.1,fw01,Network Security,IT,tier1,Linux (iptables),datacenter
+10.10.10.5,bastion01,Security Operations,IT,tier1,Ubuntu 22.04,dmz
+10.10.10.20,web01,Web Platform,Engineering,tier2,Ubuntu 22.04,dmz
+10.10.10.21,web02,Web Platform,Engineering,tier2,Ubuntu 22.04,dmz
+10.10.30.10,db01,Data Platform (customer PII),Engineering,tier1,RHEL 9,datacenter
+10.10.30.15,app01,Identity Services,IT,tier1,RHEL 9,datacenter
+10.10.20.15,corp-laptop-015,End User Computing,Sales,tier3,Windows 11,corp
+10.10.20.31,corp-laptop-031,End User Computing,HR,tier3,Windows 11,corp
+10.10.20.45,fin-laptop-045,End User Computing,Finance,tier2,Windows 11,corp
+10.10.20.52,corp-laptop-052,End User Computing,Engineering,tier3,macOS 14,corp
+10.10.20.67,corp-laptop-067,End User Computing,Marketing,tier3,Windows 11,corp
+10.10.20.88,corp-laptop-088,End User Computing,Legal,tier3,Windows 11,corp
