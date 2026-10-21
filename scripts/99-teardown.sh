@@ -4,6 +4,15 @@ source "$(dirname "$0")/lib.sh"
 load_properties
 require DEMO_ID
 
+# DuckDB UI (scripts/06-duckdb-ui.sh) runs natively on the Mac, not in Docker. Match on its init-file
+# name so only the demo's DuckDB is stopped, never another DuckDB session you have open.
+if pgrep -f "siem-duckdb-init" >/dev/null 2>&1; then
+  info "stopping the DuckDB UI (http://localhost:4213)"
+  pkill -f "siem-duckdb-init" || true
+fi
+# leftover init files (they contain the Tableflow secret) if a session was ever killed hard
+find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'siem-duckdb-init.*' -type f -delete 2>/dev/null || true
+
 info "stopping containers and removing volumes"
 compose --profile tools down -v --remove-orphans || true
 

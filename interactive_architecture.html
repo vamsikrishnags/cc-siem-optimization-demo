@@ -127,12 +127,41 @@
   .stepnav button { flex: 1; }
   .stepnav .count { font: 600 11.5px var(--mono); color: var(--muted); min-width: 52px; text-align: center; }
 
+  /* ---- collapsible side panel ---- */
+  main.collapsed { grid-template-columns: 1fr 0; }
+  main.collapsed aside { display: none; }
+  #panelTab {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 6;
+    border-radius: 8px 0 0 8px; border-right: 0; padding: 14px 6px; writing-mode: vertical-rl;
+    font-size: 11.5px; letter-spacing: .04em; color: var(--muted); display: none;
+  }
+  main.collapsed #panelTab { display: block; }
+
+  /* ---- zoom controls + minimap (bottom-right of the canvas) ---- */
+  #navbox {
+    position: absolute; right: 12px; bottom: 12px; z-index: 6; display: flex; flex-direction: column; gap: 6px;
+    align-items: stretch; width: 250px;
+  }
+  .zoombar { display: flex; gap: 6px; align-items: center; }
+  .zoombar button { padding: 5px 10px; font-size: 14px; line-height: 1; }
+  .zoombar .pct { flex: 1; text-align: center; font: 600 12px var(--mono); color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
+  #minimap {
+    width: 250px; height: 140px; background: rgba(11, 15, 23, .92); border: 1px solid var(--line); border-radius: 10px;
+    cursor: crosshair; display: block;
+  }
+  .maplabel { font: 600 10.5px var(--sans); color: var(--faint); text-transform: uppercase; letter-spacing: .08em; padding-left: 2px; }
+  #navbox.hidden-map #minimap, #navbox.hidden-map .maplabel { display: none; }
+
   @media (max-width: 980px) {
     main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    main.collapsed { grid-template-rows: 1fr 0; }
     aside { border-left: 0; border-top: 1px solid var(--line); max-height: none; }
     #legend { max-width: calc(100% - 24px); }
     header { padding: 10px 16px; }
     .controls { margin-left: 0; }
+    #navbox { width: 180px; }
+    #minimap { width: 180px; height: 100px; }
   }
 </style>
 </head>
@@ -149,6 +178,8 @@
     <label class="toggle"><input type="checkbox" id="chkLabels" checked> edge labels</label>
     <button id="btnFit">Fit view</button>
     <button id="btnReset">Reset layout</button>
+    <button id="btnMap" title="Show or hide the overview minimap">Minimap</button>
+    <button id="btnPanel" title="Hide or show the details panel">⇥ Hide panel</button>
   </div>
 </header>
 
@@ -156,7 +187,18 @@
   <section id="stage">
     <div id="network" aria-label="Interactive architecture diagram"></div>
     <div id="legend"></div>
-    <div class="hint">Drag nodes · scroll to zoom · drag background to pan · click a node for details</div>
+    <div class="hint">Pinch or mouse wheel to zoom · two-finger swipe or drag background to pan · drag nodes · click a node for details</div>
+    <button id="panelTab" title="Show the details panel">⇤ Details</button>
+    <div id="navbox">
+      <div class="maplabel" title="Click or drag in the overview to navigate">Overview</div>
+      <canvas id="minimap" width="500" height="280" aria-label="Overview minimap"></canvas>
+      <div class="zoombar">
+        <button id="zOut" title="Zoom out">−</button>
+        <span class="pct" id="zPct">100%</span>
+        <button id="zIn" title="Zoom in">+</button>
+        <button id="zFit" title="Fit the whole architecture">⤢</button>
+      </div>
+    </div>
   </section>
   <aside>
     <div class="tabs">
@@ -564,7 +606,8 @@ const edges = new vis.DataSet(EDGES.map((e, i) => ({
 const container = document.getElementById('network');
 const network = new vis.Network(container, { nodes, edges }, {
   physics: false,
-  interaction: { hover: true, dragNodes: true, dragView: true, zoomView: true, multiselect: false, navigationButtons: false, keyboard: false, tooltipDelay: 200 },
+  // zoomView is off: the built-in wheel zoom is far too sensitive on trackpads; see the custom handler below
+  interaction: { hover: true, dragNodes: true, dragView: true, zoomView: false, multiselect: false, navigationButtons: false, keyboard: false, tooltipDelay: 200 },
   layout: { improvedLayout: false },
   nodes: { chosen: true },
   edges: { selectionWidth: 1.2, hoverWidth: .6 },
@@ -787,6 +830,135 @@ function fitAll(animate) {
   network.moveTo({ position: { x: 1170, y: 40 }, scale: s, animation: animate ? { duration: 500 } : false });
 }
 network.once('afterDrawing', () => fitAll(false));
+
+/* ------------------------------------------------------------------ gentle zoom + pan */
+const ZOOM_MIN = 0.15, ZOOM_MAX = 2.5;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function zoomAt(factor, domX, domY, animate = false) {
+  const scale = network.getScale();
+  const next = clamp(scale * factor, ZOOM_MIN, ZOOM_MAX);
+  if (next === scale) return;
+  const rect = container.getBoundingClientRect();
+  const px = domX ?? rect.width / 2, py = domY ?? rect.height / 2;
+  const anchor = network.DOMtoCanvas({ x: px, y: py });        // keep the point under the cursor fixed
+  const position = { x: anchor.x - (px - rect.width / 2) / next, y: anchor.y - (py - rect.height / 2) / next };
+  network.moveTo({ position, scale: next, animation: animate ? { duration: 200, easingFunction: 'easeOutQuad' } : false });
+}
+function panBy(dx, dy) {
+  const s = network.getScale(), p = network.getViewPosition();
+  network.moveTo({ position: { x: p.x + dx / s, y: p.y + dy / s }, animation: false });
+}
+
+container.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = container.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;   // lines / pages → px
+  const dx = e.deltaX * unit, dy = e.deltaY * unit;
+  if (e.ctrlKey) {
+    // trackpad pinch (browsers report it as ctrl + wheel): small, smooth steps
+    zoomAt(Math.exp(-clamp(dy, -40, 40) * 0.006), x, y);
+  } else if (Math.abs(dx) > 0 || Math.abs(dy) < 40) {
+    // two-finger swipe on a trackpad: pan
+    panBy(dx, dy);
+  } else {
+    // mouse wheel notch: one gentle zoom step
+    zoomAt(dy > 0 ? 1 / 1.12 : 1.12, x, y);
+  }
+}, { passive: false });
+
+document.getElementById('zIn').onclick = () => zoomAt(1.25, undefined, undefined, true);
+document.getElementById('zOut').onclick = () => zoomAt(1 / 1.25, undefined, undefined, true);
+document.getElementById('zFit').onclick = () => fitAll(true);
+
+/* ------------------------------------------------------------------ minimap */
+const mini = document.getElementById('minimap'), mctx = mini.getContext('2d');
+let worldBox = null, miniQueued = false;
+
+function computeWorld() {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  NODES.forEach(n => { const b = network.getBoundingBox(n.id); if (!b) return;
+    x1 = Math.min(x1, b.left); y1 = Math.min(y1, b.top); x2 = Math.max(x2, b.right); y2 = Math.max(y2, b.bottom); });
+  const pad = 110;
+  return { x1: x1 - pad, y1: y1 - pad - 60, x2: x2 + pad, y2: y2 + pad };
+}
+function miniTransform() {
+  const W = mini.width, H = mini.height, w = worldBox.x2 - worldBox.x1, h = worldBox.y2 - worldBox.y1;
+  const s = Math.min(W / w, H / h), ox = (W - w * s) / 2, oy = (H - h * s) / 2;
+  return { s, toMini: (x, y) => [ox + (x - worldBox.x1) * s, oy + (y - worldBox.y1) * s],
+           toWorld: (mx, my) => ({ x: worldBox.x1 + (mx - ox) / s, y: worldBox.y1 + (my - oy) / s }) };
+}
+function drawMinimap() {
+  miniQueued = false;
+  if (!worldBox) return;
+  const { s, toMini } = miniTransform();
+  mctx.clearRect(0, 0, mini.width, mini.height);
+  // boundaries
+  for (const b of BOUNDARIES) {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    b.nodes.forEach(id => { const bb = network.getBoundingBox(id); if (!bb) return;
+      x1 = Math.min(x1, bb.left); y1 = Math.min(y1, bb.top); x2 = Math.max(x2, bb.right); y2 = Math.max(y2, bb.bottom); });
+    if (!isFinite(x1)) continue;
+    const [ax, ay] = toMini(x1 - b.pad, y1 - b.pad - 18), [bx, by] = toMini(x2 + b.pad, y2 + b.pad);
+    mctx.fillStyle = hexA(b.color, .07); mctx.strokeStyle = hexA(b.color, .55); mctx.lineWidth = 1.5;
+    mctx.fillRect(ax, ay, bx - ax, by - ay); mctx.strokeRect(ax, ay, bx - ax, by - ay);
+  }
+  // edges (faint) + nodes
+  const pos = network.getPositions();
+  mctx.strokeStyle = 'rgba(124,138,165,.25)'; mctx.lineWidth = 1;
+  EDGES.forEach(e => { const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
+    const [x1, y1] = toMini(a.x, a.y), [x2, y2] = toMini(b.x, b.y);
+    mctx.beginPath(); mctx.moveTo(x1, y1); mctx.lineTo(x2, y2); mctx.stroke(); });
+  NODES.forEach(n => { const b = network.getBoundingBox(n.id); if (!b) return;
+    const [x1, y1] = toMini(b.left, b.top), [x2, y2] = toMini(b.right, b.bottom);
+    const dim = current && !current.steps.some(st => st.node === n.id);
+    mctx.fillStyle = hexA(n.color, dim ? .15 : .75); mctx.fillRect(x1, y1, Math.max(2, x2 - x1), Math.max(2, y2 - y1)); });
+  // current viewport
+  const r = container.getBoundingClientRect();
+  const tl = network.DOMtoCanvas({ x: 0, y: 0 }), br = network.DOMtoCanvas({ x: r.width, y: r.height });
+  const [vx1, vy1] = toMini(tl.x, tl.y), [vx2, vy2] = toMini(br.x, br.y);
+  mctx.fillStyle = 'rgba(56,189,248,.10)'; mctx.strokeStyle = '#38bdf8'; mctx.lineWidth = 3;
+  mctx.fillRect(vx1, vy1, vx2 - vx1, vy2 - vy1); mctx.strokeRect(vx1, vy1, vx2 - vx1, vy2 - vy1);
+  document.getElementById('zPct').textContent = Math.round(network.getScale() * 100) + '%';
+}
+function queueMinimap() { if (!miniQueued) { miniQueued = true; requestAnimationFrame(drawMinimap); } }
+network.on('afterDrawing', queueMinimap);
+network.on('dragEnd', () => { worldBox = computeWorld(); queueMinimap(); });
+network.once('afterDrawing', () => { worldBox = computeWorld(); queueMinimap(); });
+
+let miniDrag = false;
+function miniJump(ev) {
+  if (!worldBox) return;
+  const rect = mini.getBoundingClientRect();
+  const mx = (ev.clientX - rect.left) * (mini.width / rect.width), my = (ev.clientY - rect.top) * (mini.height / rect.height);
+  network.moveTo({ position: miniTransform().toWorld(mx, my), animation: false });
+}
+mini.addEventListener('pointerdown', ev => { miniDrag = true; mini.setPointerCapture(ev.pointerId); miniJump(ev); });
+mini.addEventListener('pointermove', ev => { if (miniDrag) miniJump(ev); });
+mini.addEventListener('pointerup', () => { miniDrag = false; });
+mini.addEventListener('wheel', ev => { ev.preventDefault(); zoomAt(ev.deltaY > 0 ? 1 / 1.12 : 1.12); }, { passive: false });
+
+document.getElementById('btnMap').onclick = () => {
+  document.getElementById('navbox').classList.toggle('hidden-map'); queueMinimap();
+};
+
+/* ------------------------------------------------------------------ collapsible side panel */
+const mainEl = document.querySelector('main');
+function setPanel(open) {
+  mainEl.classList.toggle('collapsed', !open);
+  document.getElementById('btnPanel').textContent = open ? '⇥ Hide panel' : '⇤ Show panel';
+  try { localStorage.setItem('siemArchPanel', open ? 'open' : 'closed'); } catch (_) { /* storage unavailable */ }
+  requestAnimationFrame(() => { network.setSize('100%', '100%'); network.redraw(); queueMinimap(); });
+}
+document.getElementById('btnPanel').onclick = () => setPanel(mainEl.classList.contains('collapsed'));
+document.getElementById('panelTab').onclick = () => setPanel(true);
+try { if (localStorage.getItem('siemArchPanel') === 'closed') setPanel(false); } catch (_) { /* storage unavailable */ }
+
+// opening details or a sample flow brings the panel back
+const _showDetails = showDetails, _switchTab = switchTab;
+showDetails = id => { if (mainEl.classList.contains('collapsed')) setPanel(true); _showDetails(id); };
+switchTab = t => { if (mainEl.classList.contains('collapsed') && (t === 'trace' || t === 'details')) setPanel(true); _switchTab(t); };
 
 /* deep links: #trace=dns  or  #node=f_sys */
 const hash = new URLSearchParams(location.hash.slice(1));
