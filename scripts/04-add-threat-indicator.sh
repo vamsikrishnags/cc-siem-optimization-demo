@@ -10,3 +10,10 @@ NAME="${5:-Mass port scanner (analyst-added, live demo)}"
 compose run --rm --no-deps reference-loader \
   python reference_loader.py add-indicator "$INDICATOR" "$TYPE" "$CATEGORY" "$SEVERITY" "$NAME"
 info "added $INDICATOR - watch Kibana for rule 'Threat intel match: $CATEGORY'"
+
+next_steps "open Kibana (new matches appear within a few minutes; filter: event.rule : \"Threat intel match: $CATEGORY\")" \
+           "open \"$KIBANA_URL\"" \
+           "show that every event is kept in the Iceberg lake" \
+           "./scripts/03-lake-query.sh" \
+           "when the demo is over" \
+           "./scripts/99-teardown.sh"

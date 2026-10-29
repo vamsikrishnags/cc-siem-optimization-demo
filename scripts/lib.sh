@@ -46,3 +46,15 @@ require() {
 }
 
 compose() { docker compose --project-directory "$DOCKER_DIR" -f "$DOCKER_DIR/docker-compose.yml" "$@"; }
+
+# Prints copy-pasteable next steps (run from the repo root):
+#   next_steps "what it does" "command" ["what it does" "command" ...]
+next_steps() {
+  printf '\n\033[1;32m==> Next step%s\033[0m   (run from %s)\n' "$( (( $# > 2 )) && echo s)" "$ROOT_DIR"
+  while (( $# >= 2 )); do
+    printf '  \033[2m# %s\033[0m\n  %s\n\n' "$1" "$2"
+    shift 2
+  done
+}
+
+KIBANA_URL="http://localhost:5601/app/dashboards#/view/siem-optimization"

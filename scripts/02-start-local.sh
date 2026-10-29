@@ -24,8 +24,12 @@ compose logs --no-log-prefix siem-setup | grep -vE '^waiting' | tail -5
 
 cat <<MSG
 
-  Kibana dashboard : http://localhost:5601/app/dashboards#/view/siem-optimization
+  Kibana dashboard : $KIBANA_URL
   Kafka Connect    : http://localhost:8083/connectors/siem-elasticsearch-sink/status
   Fluent Bit       : http://localhost:2020/api/v1/metrics
-  Status           : ./scripts/05-status.sh
 MSG
+
+next_steps "check containers, the sink connector and Elastic doc counts (alerts arrive within 1-2 min)" \
+           "./scripts/05-status.sh" \
+           "open the Kibana dashboard" \
+           "open \"$KIBANA_URL\""

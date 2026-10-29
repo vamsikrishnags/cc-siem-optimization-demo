@@ -26,6 +26,18 @@ if [[ -f "$PROPS" ]]; then
   info "DEMO_ID=$DEMO_ID -> environment $env_desc, cluster ${CC_CLUSTER_NAME:-siem-demo}-$DEMO_ID, resources siem-$DEMO_ID-*"
   info "suggested bootstrap service account name: siem-demo-$DEMO_ID-admin"
 else
-  warn "demo.properties missing (cp demo.properties.example demo.properties)"; ok=0
+  warn "demo.properties missing"
+  next_steps "create your inputs file, fill it in (README > Prerequisites), then re-run this check" \
+             "cp demo.properties.example demo.properties && ./scripts/00-check-prereqs.sh"
+  exit 1
 fi
-(( ok )) && info "prerequisites look good" || die "fix the warnings above"
+(( ok )) || die "fix the warnings above, then re-run: ./scripts/00-check-prereqs.sh"
+info "prerequisites look good"
+
+if [[ -z "${CC_SERVICE_ACCOUNT_ID:-}" || -z "${CC_CLOUD_API_KEY:-}" || -z "${CC_CLOUD_API_SECRET:-}" ]]; then
+  next_steps "create the service account + Cloud API key (README > Prerequisites; suggested name siem-demo-$DEMO_ID-admin), fill CC_SERVICE_ACCOUNT_ID / CC_CLOUD_API_KEY / CC_CLOUD_API_SECRET, then provision" \
+             "./scripts/01-provision-cloud.sh"
+else
+  next_steps "provision Confluent Cloud: environment, cluster, Flink, Tableflow (~10 min)" \
+             "./scripts/01-provision-cloud.sh"
+fi

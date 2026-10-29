@@ -46,4 +46,9 @@ fi
 
 info "DuckDB UI -> http://localhost:4213   (views: zeek_conn, zeek_dns, zeek_http, syslog_events)"
 info "keep this terminal open; type .exit to stop"
-duckdb -ui -init "$INIT"
+duckdb -ui -init "$INIT" || true
+
+next_steps "UI tokens expire after ~30 min: start a fresh session if queries return 401" \
+           "./scripts/06-duckdb-ui.sh" \
+           "when the demo is over: stop everything and destroy the cloud resources" \
+           "./scripts/99-teardown.sh"

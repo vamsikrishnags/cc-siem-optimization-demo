@@ -17,7 +17,14 @@ info "stopping containers and removing volumes"
 compose --profile tools down -v --remove-orphans || true
 
 read -r -p "Destroy the Confluent Cloud resources of demo '$DEMO_ID' (siem-$DEMO_ID-*)? [y/N] " answer
-[[ "$answer" =~ ^[Yy]$ ]] || { info "cloud resources kept"; exit 0; }
+if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+  info "cloud resources kept (still billed)"
+  next_steps "restart the laptop side against the same cloud setup" \
+             "./scripts/02-start-local.sh" \
+             "or destroy the cloud resources later" \
+             "./scripts/99-teardown.sh"
+  exit 0
+fi
 
 # Flink-registered schemas are not Terraform resources and live in the environment's Schema Registry,
 # so delete them now - the Schema Registry API key used for this is destroyed with everything else.
@@ -47,5 +54,11 @@ path = sys.argv[1]
 text = open(path).read()
 open(path, "w").write(re.sub(r"^DEMO_ID=.*$", "DEMO_ID=", text, count=1, flags=re.M))
 PY
-  info "DEMO_ID cleared - ./scripts/00-check-prereqs.sh will generate a new one"
+  info "DEMO_ID cleared"
+  next_steps "fresh run: generate a new demo id and check prerequisites" \
+             "./scripts/00-check-prereqs.sh"
+else
+  next_steps "run again with the same demo id ($DEMO_ID)" \
+             "./scripts/01-provision-cloud.sh"
 fi
+info "kept on purpose: your bootstrap service account and its API keys (delete them in the Confluent Cloud console when no longer needed)"

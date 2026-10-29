@@ -32,7 +32,9 @@ APPROVE_FLAG=""
 
 info "demo id: $DEMO_ID"
 info "terraform init"
-terraform -chdir="$TF_DIR" init -upgrade -input=false >/dev/null
+# no -upgrade: use the provider version pinned in terraform/.terraform.lock.hcl so every run is reproducible.
+# To move to a newer provider on purpose: terraform -chdir=terraform init -upgrade, test, commit the lock file.
+terraform -chdir="$TF_DIR" init -input=false >/dev/null
 
 info "terraform apply (Confluent Cloud) - takes ~10 minutes"
 # shellcheck disable=SC2086
@@ -41,4 +43,6 @@ terraform -chdir="$TF_DIR" apply -input=false $APPROVE_FLAG
 info "writing docker/.env from terraform outputs"
 terraform -chdir="$TF_DIR" output -json | python3 "$ROOT_DIR/scripts/write_env.py" "$DOCKER_DIR/.env"
 chmod 600 "$DOCKER_DIR/.env"
-info "done - next: ./scripts/02-start-local.sh"
+info "cloud side provisioned"
+next_steps "download the pcap (first run only), build images and start the laptop containers" \
+           "./scripts/02-start-local.sh"

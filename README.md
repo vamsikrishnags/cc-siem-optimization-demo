@@ -8,7 +8,7 @@ Confluent's **Elasticsearch Sink connector**, and keep a full copy of every log 
 Inspired by [confluentinc/demo-siem-optimization](https://github.com/confluentinc/demo-siem-optimization).
 Provisioned with Terraform, and runs natively on Apple Silicon.
 
-![Kibana dashboard](docs/kibana-dashboard.png)
+<img src="docs/kibana-dashboard.png" alt="Kibana dashboard" width="100%">
 
 ---
 
@@ -194,6 +194,14 @@ On Azure it also loads DuckDB's `azure` extension with the curl transport, becau
 ./scripts/02-start-local.sh          # downloads pcap once (~1 GB), builds images, starts everything
 ./scripts/05-status.sh               # containers, connector state, Elastic doc counts
 ```
+
+To confirm the cloud side is healthy, open **Confluent Cloud → your environment → Stream Lineage**.
+When everything is running, it looks like this:
+- the Fluent Bit and reference-loader producers write to the raw and reference topics
+- the `siem-<id>-normalize` statement fans out to the governed topics
+- the four `siem-<id>-siem-*` statements join the reference tables and write to `siem_events`
+
+<img src="docs/stream-lineage.png" alt="Stream Lineage in Confluent Cloud with all components running" width="100%">
 
 Open **Kibana → Confluent SIEM Optimization**: <http://localhost:5601/app/dashboards#/view/siem-optimization>.
 Alerts appear within about 1–2 minutes. The volume tiles fill in as each one-minute window closes.
