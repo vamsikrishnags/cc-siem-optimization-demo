@@ -6,7 +6,8 @@ fraction went to the SIEM.
   docker compose --profile tools run --rm lake-query python lake_query.py "SELECT ..."
 
 Views zeek_conn, zeek_dns, zeek_http and syslog_events point at
-lake."<cluster id>"."<topic>" (the catalog namespace is the Kafka cluster id).
+lake."<cluster id>"."<topic>" (the catalog namespace is the Kafka cluster id; the topic - and so the
+Iceberg table - is <name>_<DEMO_ID>, e.g. zeek_conn_k3x9q2).
 """
 
 import json
@@ -21,6 +22,7 @@ API_KEY = os.environ.get("TABLEFLOW_API_KEY", "")
 API_SECRET = os.environ.get("TABLEFLOW_API_SECRET", "")
 CLUSTER_ID = os.environ.get("KAFKA_CLUSTER_ID", "")
 WAREHOUSE = os.environ.get("TABLEFLOW_WAREHOUSE", "warehouse")
+DEMO_ID = os.environ.get("DEMO_ID", "")
 TABLES = ["zeek_conn", "zeek_dns", "zeek_http", "syslog_events"]
 
 DEMO_QUERIES = [
@@ -69,15 +71,16 @@ def connect():
 def register(con):
     registered = []
     for table in TABLES:
+        source = f'lake."{CLUSTER_ID}"."{table}_{DEMO_ID}"'
         try:
-            con.execute(f'CREATE VIEW {table} AS SELECT * FROM lake."{CLUSTER_ID}"."{table}"')
+            con.execute(f"CREATE VIEW {table} AS SELECT * FROM {source}")
             con.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchall()
         except duckdb.Error as exc:
             print(f"! {table}: not queryable yet ({str(exc).splitlines()[0][:160]})")
             con.execute(f"DROP VIEW IF EXISTS {table}")
             continue
         registered.append(table)
-        print(f'registered {table:<14} -> lake."{CLUSTER_ID}"."{table}"')
+        print(f"registered {table:<14} -> {source}")
     return registered
 
 
@@ -90,8 +93,8 @@ def siem_count():
 
 
 def main():
-    if not (ENDPOINT and API_KEY and API_SECRET and CLUSTER_ID):
-        sys.exit("TABLEFLOW_CATALOG_ENDPOINT / TABLEFLOW_API_KEY / TABLEFLOW_API_SECRET / KAFKA_CLUSTER_ID "
+    if not (ENDPOINT and API_KEY and API_SECRET and CLUSTER_ID and DEMO_ID):
+        sys.exit("TABLEFLOW_CATALOG_ENDPOINT / TABLEFLOW_API_KEY / TABLEFLOW_API_SECRET / KAFKA_CLUSTER_ID / DEMO_ID "
                  "are not set (docker/.env is written by scripts/01-provision-cloud.sh)")
     con = connect()
     registered = register(con)

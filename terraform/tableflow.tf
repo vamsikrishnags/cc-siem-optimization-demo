@@ -14,7 +14,8 @@ locals {
 resource "confluent_tableflow_topic" "lake" {
   for_each = toset(local.lake_topics)
 
-  display_name  = each.value
+  # the topic <name>_<demo id>; also the Iceberg table name
+  display_name  = "${each.value}${local.topic_suffix}"
   table_formats = ["ICEBERG"] # Confluent-managed storage materializes Iceberg (Delta needs bring-your-own storage)
 
   environment {

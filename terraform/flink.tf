@@ -42,6 +42,13 @@ resource "confluent_api_key" "flink" {
 locals {
   flink_sql_dir = "${path.module}/../flink"
 
+  # The SQL files use the short table names (`zeek_conn`, `siem_events`, ...); every backticked
+  # table name gets the demo id appended at submit time (`zeek_conn` -> `zeek_conn_k3x9q2`).
+  # scripts/07-flink-sql.sh does the same for the ad-hoc demo queries (keep the list in sync with scripts/lib.sh).
+  flink_table_regex = "/`(${join("|", concat(local.raw_topics, local.lake_topics,
+  ["siem_events", "pipeline_metrics", "threat_intel", "asset_inventory"]))})`/"
+  flink_table_name = "`$${1}${local.topic_suffix}`"
+
   flink_catalog_properties = {
     "sql.current-catalog"  = data.confluent_environment.demo.display_name
     "sql.current-database" = confluent_kafka_cluster.standard.display_name
@@ -86,7 +93,7 @@ resource "confluent_flink_statement" "ddl" {
   for_each = local.ddl_statements
 
   statement_name = "${local.prefix}-ddl-${each.key}"
-  statement      = file("${local.flink_sql_dir}/${each.value}")
+  statement      = replace(file("${local.flink_sql_dir}/${each.value}"), local.flink_table_regex, local.flink_table_name)
   properties     = local.flink_catalog_properties
 
   organization {
@@ -114,7 +121,7 @@ resource "confluent_flink_statement" "alter" {
   for_each = local.alter_statements
 
   statement_name = "${local.prefix}-ddl-${each.key}"
-  statement      = file("${local.flink_sql_dir}/${each.value}")
+  statement      = replace(file("${local.flink_sql_dir}/${each.value}"), local.flink_table_regex, local.flink_table_name)
   properties     = local.flink_catalog_properties
 
   organization {
@@ -142,8 +149,11 @@ resource "confluent_flink_statement" "dml" {
   for_each = local.dml_statements
 
   statement_name = "${local.prefix}-${each.key}"
-  statement      = replace(file("${local.flink_sql_dir}/${each.value}"), "__PII_SALT__", var.pii_hash_salt)
-  properties     = local.flink_streaming_properties
+  statement = replace(
+    replace(file("${local.flink_sql_dir}/${each.value}"), local.flink_table_regex, local.flink_table_name),
+    "__PII_SALT__", var.pii_hash_salt
+  )
+  properties = local.flink_streaming_properties
 
   organization {
     id = data.confluent_organization.main.id

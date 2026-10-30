@@ -4,6 +4,7 @@
 *.properties.bak
 .env
 docker/.env
+/git.txt
 
 # --- Terraform: local state belongs to one demo run and contains API secrets ---
 terraform/.terraform/

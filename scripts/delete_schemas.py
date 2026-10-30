@@ -1,12 +1,13 @@
 """Hard-deletes the Schema Registry subjects that the demo's Flink tables registered.
 
-Flink `CREATE TABLE` registers <table>-key / <table>-value subjects. Terraform did not create
-them, and Schema Registry belongs to the environment (not the cluster), so they survive
-`terraform destroy`. Soft delete first, then permanent delete (Schema Registry requires both).
+Flink `CREATE TABLE` registers <table>-key / <table>-value subjects; the tables are named
+<name>_<DEMO_ID>, so only this demo's subjects match. Terraform did not create them, and Schema
+Registry belongs to the environment (not the cluster), so they survive `terraform destroy`.
+Soft delete first, then permanent delete (Schema Registry requires both).
 
-  python3 scripts/delete_schemas.py            # uses SCHEMA_REGISTRY_URL / _API_KEY / _API_SECRET from env
+  python3 scripts/delete_schemas.py            # uses DEMO_ID + SCHEMA_REGISTRY_URL / _API_KEY / _API_SECRET from env
   python3 scripts/delete_schemas.py --dry-run
-  python3 scripts/delete_schemas.py --print-cli env-xxxxx   # no SR key left? print Confluent CLI commands
+  DEMO_ID=k3x9q2 python3 scripts/delete_schemas.py --print-cli env-xxxxx   # no SR key left? print CLI commands
 """
 
 import base64
@@ -19,7 +20,10 @@ import urllib.request
 
 TABLES = ["threat_intel", "asset_inventory", "zeek_conn", "zeek_dns", "zeek_http", "syslog_events",
           "siem_events", "pipeline_metrics"]
-SUBJECTS = [f"{t}-{part}" for t in TABLES for part in ("key", "value")]
+DEMO_ID = os.environ.get("DEMO_ID", "")
+if not DEMO_ID:
+    sys.exit("DEMO_ID not set - e.g. DEMO_ID=k3x9q2 python3 scripts/delete_schemas.py ...")
+SUBJECTS = [f"{t}_{DEMO_ID}-{part}" for t in TABLES for part in ("key", "value")]
 
 
 def call(method, path):

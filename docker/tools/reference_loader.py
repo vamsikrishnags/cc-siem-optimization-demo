@@ -1,7 +1,8 @@
 """Loads enrichment reference data into Confluent Cloud.
 
   threat_intel     <- data/threat_intel.csv (curated demo indicators)
-                      + public ad/tracker watchlist (WATCHLIST_URL, from the reference repo)
+                      + public ad/tracker watchlist data/ad_servers.csv (MVPS hosts list, bundled;
+                        WATCHLIST_URL optionally downloads a newer copy instead)
   asset_inventory  <- data/asset_inventory.csv (each asset keyed by IP *and* by hostname)
 
 The tables (and their Avro key/value schemas) are created by Flink DDL; this loader serializes
@@ -24,6 +25,11 @@ from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+def topic(table):
+    """Topics / Flink tables carry the demo id: threat_intel -> threat_intel_<DEMO_ID>."""
+    return f"{table}_{env('DEMO_ID')}"
 
 
 def env(name):
@@ -54,9 +60,9 @@ def wait_for_subject(sr, subject, timeout=600):
 
 def producer_for(sr, table, key_field):
     serializer_conf = {"auto.register.schemas": False, "use.latest.version": True}
-    value_serializer = AvroSerializer(sr, wait_for_subject(sr, f"{table}-value"), conf=serializer_conf)
+    value_serializer = AvroSerializer(sr, wait_for_subject(sr, f"{topic(table)}-value"), conf=serializer_conf)
     # the primary key is an Avro record with one field, e.g. {"indicator": "1.2.3.4"}
-    key_avro = AvroSerializer(sr, wait_for_subject(sr, f"{table}-key"), conf=serializer_conf)
+    key_avro = AvroSerializer(sr, wait_for_subject(sr, f"{topic(table)}-key"), conf=serializer_conf)
 
     def key_serializer(key, ctx):
         return key_avro({key_field: key}, ctx)
@@ -85,15 +91,17 @@ def threat_rows():
             row["confidence"] = int(row["confidence"]) if row["confidence"] else None
             yield row
 
+    body = None
     url = os.getenv("WATCHLIST_URL")
-    if not url:
-        return
-    print(f"downloading public watchlist {url}", flush=True)
-    try:
-        body = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
-    except Exception as exc:
-        print(f"WARN: watchlist download failed ({exc}); continuing with curated indicators only", flush=True)
-        return
+    if url:
+        print(f"downloading public watchlist {url}", flush=True)
+        try:
+            body = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
+        except Exception as exc:
+            print(f"WARN: watchlist download failed ({exc}); using the bundled copy", flush=True)
+    if body is None:
+        with open(os.path.join(DATA_DIR, "ad_servers.csv"), encoding="utf-8") as f:
+            body = f.read()
     seen = set()
     for row in csv.DictReader(io.StringIO(body)):
         domain = (row.get("domain") or "").strip().lower()
@@ -118,13 +126,13 @@ def asset_rows():
 def produce(producer, table, key_field, rows):
     count = 0
     for row in rows:
-        producer.produce(topic=table, key=row[key_field], value=row)
+        producer.produce(topic=topic(table), key=row[key_field], value=row)
         producer.poll(0)
         count += 1
     remaining = producer.flush(60)
     if remaining:
-        sys.exit(f"{remaining} messages to {table} were not delivered")
-    print(f"loaded {count} rows into {table}", flush=True)
+        sys.exit(f"{remaining} messages to {topic(table)} were not delivered")
+    print(f"loaded {count} rows into {topic(table)}", flush=True)
 
 
 def load():

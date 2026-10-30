@@ -13,7 +13,7 @@ set -a
 # shellcheck disable=SC1091
 source "$DOCKER_DIR/.env"
 set +a
-require TABLEFLOW_CATALOG_ENDPOINT TABLEFLOW_API_KEY TABLEFLOW_API_SECRET KAFKA_CLUSTER_ID
+require TABLEFLOW_CATALOG_ENDPOINT TABLEFLOW_API_KEY TABLEFLOW_API_SECRET KAFKA_CLUSTER_ID DEMO_ID
 
 # the init file contains the Tableflow secret: private temp file, removed on exit
 INIT="$(mktemp "${TMPDIR:-/tmp}/siem-duckdb-init.XXXXXX")"
@@ -33,10 +33,11 @@ CREATE SECRET tableflow (
   OAUTH2_SCOPE 'catalog'
 );
 ATTACH 'warehouse' AS lake (TYPE iceberg, SECRET tableflow, ENDPOINT '${TABLEFLOW_CATALOG_ENDPOINT}');
-CREATE VIEW zeek_conn     AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_conn";
-CREATE VIEW zeek_dns      AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_dns";
-CREATE VIEW zeek_http     AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_http";
-CREATE VIEW syslog_events AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."syslog_events";
+-- short view names over the demo's Iceberg tables (<topic>_<DEMO_ID>)
+CREATE VIEW zeek_conn     AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_conn_${DEMO_ID}";
+CREATE VIEW zeek_dns      AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_dns_${DEMO_ID}";
+CREATE VIEW zeek_http     AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."zeek_http_${DEMO_ID}";
+CREATE VIEW syslog_events AS SELECT * FROM lake."${KAFKA_CLUSTER_ID}"."syslog_events_${DEMO_ID}";
 SQL
 
 if [[ $# -gt 0 ]]; then            # ./scripts/06-duckdb-ui.sh "SELECT ..."  -> run one query, no UI

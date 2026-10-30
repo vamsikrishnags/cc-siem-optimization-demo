@@ -21,7 +21,10 @@ resource "confluent_environment" "demo" {
 
 locals {
   # Every name carries the demo id so the resources of one demo run are easy to find and clean up.
-  prefix         = "siem-${var.demo_id}"
+  prefix = "siem-${var.demo_id}"
+  # Topics / Flink tables are <name>_<demo id> (e.g. zeek_conn_k3x9q2), so their Schema Registry
+  # subjects - which live in the shared environment - never collide with another demo run.
+  topic_suffix   = "_${var.demo_id}"
   environment_id = var.cc_environment_id != "" ? var.cc_environment_id : confluent_environment.demo[0].id
   admin_owner = {
     id          = data.confluent_service_account.admin.id
@@ -131,7 +134,7 @@ resource "confluent_kafka_topic" "raw" {
   kafka_cluster {
     id = confluent_kafka_cluster.standard.id
   }
-  topic_name       = each.value
+  topic_name       = "${each.value}${local.topic_suffix}"
   partitions_count = 3
   rest_endpoint    = confluent_kafka_cluster.standard.rest_endpoint
 

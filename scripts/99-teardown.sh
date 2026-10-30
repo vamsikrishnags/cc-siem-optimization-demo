@@ -29,8 +29,7 @@ fi
 # Flink-registered schemas are not Terraform resources and live in the environment's Schema Registry,
 # so delete them now - the Schema Registry API key used for this is destroyed with everything else.
 if [[ -f "$DOCKER_DIR/.env" ]]; then
-  read -r -p "Hard-delete the demo's Schema Registry subjects (zeek_*, syslog_events, siem_events, threat_intel, ...)?
-  They belong to the environment: answer n if another demo still runs in the same environment. [Y/n] " answer
+  read -r -p "Hard-delete this demo's Schema Registry subjects (zeek_conn_${DEMO_ID}-value, siem_events_${DEMO_ID}-value, ...)? [Y/n] " answer
   if [[ ! "$answer" =~ ^[Nn]$ ]]; then
     ( set -a; source "$DOCKER_DIR/.env"; set +a; python3 "$ROOT_DIR/scripts/delete_schemas.py" ) \
       || warn "schema cleanup failed - see: python3 scripts/delete_schemas.py --print-cli <env-id>"

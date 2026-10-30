@@ -170,6 +170,7 @@ services:
     profiles: ["tools"]
     command: ["python", "lake_query.py"]
     environment:
+      DEMO_ID: ${DEMO_ID:-local}
       TABLEFLOW_CATALOG_ENDPOINT: ${TABLEFLOW_CATALOG_ENDPOINT}
       TABLEFLOW_API_KEY: ${TABLEFLOW_API_KEY}
       TABLEFLOW_API_SECRET: ${TABLEFLOW_API_SECRET}

@@ -25,6 +25,8 @@ compose logs --no-log-prefix siem-setup | grep -vE '^waiting' | tail -5
 cat <<MSG
 
   Kibana dashboard : $KIBANA_URL
+  Discover (SIEM)  : $DISCOVER_URL
+  PII masking check: $PII_CHECK_URL
   Kafka Connect    : http://localhost:8083/connectors/siem-elasticsearch-sink/status
   Fluent Bit       : http://localhost:2020/api/v1/metrics
 MSG

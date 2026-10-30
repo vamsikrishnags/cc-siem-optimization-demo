@@ -13,6 +13,8 @@ info "added $INDICATOR - watch Kibana for rule 'Threat intel match: $CATEGORY'"
 
 next_steps "open Kibana (new matches appear within a few minutes; filter: event.rule : \"Threat intel match: $CATEGORY\")" \
            "open \"$KIBANA_URL\"" \
+           "or find the matches in Discover (search: event.rule : \"Threat intel match: $CATEGORY\")" \
+           "open \"$DISCOVER_URL\"" \
            "show that every event is kept in the Iceberg lake" \
            "./scripts/03-lake-query.sh" \
            "when the demo is over" \

@@ -1,3 +1,5 @@
+-- Short table names: in Confluent Cloud every table is <name>_<DEMO_ID>.
+-- ./scripts/07-flink-sql.sh prints this file with your demo's names, ready to paste.
 -- ---------------------------------------------------------------------------------------
 -- 1. Raw, schemaless JSON exactly as Fluent Bit wrote it
 -- ---------------------------------------------------------------------------------------

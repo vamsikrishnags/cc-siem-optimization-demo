@@ -2,6 +2,7 @@
   "index_patterns": ["siem_events*"],
   "priority": 200,
   "template": {
+    "aliases": { "siem_events": {} },
     "settings": { "number_of_shards": 1, "number_of_replicas": 0, "refresh_interval": "5s" },
     "mappings": {
       "dynamic_templates": [

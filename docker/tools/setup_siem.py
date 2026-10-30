@@ -74,7 +74,10 @@ def sink_connector():
              lambda r: any("ElasticsearchSinkConnector" in p.get("class", "") for p in r))
     with open(f"{CONFIG}/connect/elasticsearch-sink.json") as f:
         template = string.Template(f.read())
+    # topics (= indices) are siem_events_<DEMO_ID> / pipeline_metrics_<DEMO_ID>. The sink rejects
+    # topic-renaming SMTs, so the index templates add the plain names as aliases for Kibana instead.
     config = json.loads(template.substitute({
+        "DEMO_ID": os.environ["DEMO_ID"],
         "VALUE_CONVERTER": os.getenv("VALUE_CONVERTER", "io.confluent.connect.avro.AvroConverter"),
         "SCHEMA_REGISTRY_URL": os.getenv("SCHEMA_REGISTRY_URL", ""),
         "SCHEMA_REGISTRY_API_KEY": os.getenv("SCHEMA_REGISTRY_API_KEY", ""),

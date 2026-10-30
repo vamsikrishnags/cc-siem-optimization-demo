@@ -16,6 +16,12 @@ done
 if (( siem_docs > 0 )); then
   next_steps "open the Kibana dashboard" \
              "open \"$KIBANA_URL\"" \
+             "browse the SIEM events (data view: SIEM events (Confluent curated)) in Discover" \
+             "open \"$DISCOVER_URL\"" \
+             "check PII masking: user.name is user-<hash>, messages show [USER] / [EMAIL]" \
+             "open \"$PII_CHECK_URL\"" \
+             "print the ad-hoc Flink SQL with this demo's table names (paste into a Flink SQL workspace)" \
+             "./scripts/07-flink-sql.sh" \
              "after ~10-15 min (first Tableflow snapshot): query the full-fidelity Iceberg lake" \
              "./scripts/03-lake-query.sh"
 else

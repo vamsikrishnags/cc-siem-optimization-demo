@@ -1,7 +1,7 @@
 # Fluent Bit: the laptop-side log shipper.
 #   - tails Zeek JSON logs (conn/dns/http) written by the zeek container
 #   - receives RFC3164 syslog over UDP from the syslog generator (firewall/sshd/sudo/...)
-#   - produces everything, unmodified, to raw topics in Confluent Cloud
+#   - produces everything, unmodified, to raw topics in Confluent Cloud (<name>_raw_<DEMO_ID>)
 service:
   flush: 1
   log_level: info
@@ -67,7 +67,7 @@ pipeline:
   outputs:
     - name: kafka
       match: zeek.conn
-      topics: zeek_conn_raw
+      topics: zeek_conn_raw_${DEMO_ID}
       brokers: ${KAFKA_BOOTSTRAP}
       format: json
       timestamp_key: '@timestamp'
@@ -82,7 +82,7 @@ pipeline:
 
     - name: kafka
       match: zeek.dns
-      topics: zeek_dns_raw
+      topics: zeek_dns_raw_${DEMO_ID}
       brokers: ${KAFKA_BOOTSTRAP}
       format: json
       timestamp_key: '@timestamp'
@@ -97,7 +97,7 @@ pipeline:
 
     - name: kafka
       match: zeek.http
-      topics: zeek_http_raw
+      topics: zeek_http_raw_${DEMO_ID}
       brokers: ${KAFKA_BOOTSTRAP}
       format: json
       timestamp_key: '@timestamp'
@@ -112,7 +112,7 @@ pipeline:
 
     - name: kafka
       match: syslog
-      topics: syslog_raw
+      topics: syslog_raw_${DEMO_ID}
       brokers: ${KAFKA_BOOTSTRAP}
       format: json
       timestamp_key: '@timestamp'

@@ -2,7 +2,11 @@
 
     python3 docker/elastic/kibana/build_dashboard.py
 
-Objects: 2 data views, 9 Lens visualizations, 1 markdown panel, 1 saved search, 1 dashboard.
+Objects: 2 data views, 9 Lens visualizations, 2 markdown panels, 2 saved searches, 1 dashboard.
+
+Discover links (also printed by the scripts, see scripts/lib.sh):
+  /app/discover#/view/search-siem   all SIEM events, data view "SIEM events (Confluent curated)"
+  /app/discover#/view/search-pii    PII masking check (pseudonymized users, redacted e-mails)
 """
 
 import json
@@ -10,6 +14,10 @@ import os
 
 SIEM_DV = "siem-events-dv"
 METRICS_DV = "pipeline-metrics-dv"
+LAST_HOUR = "?_g=(time:(from:now-1h,to:now))"
+DISCOVER_SIEM = f"/app/discover#/view/search-siem{LAST_HOUR}"
+DISCOVER_PII = f"/app/discover#/view/search-pii{LAST_HOUR}"
+PII_QUERY = "user.name : user-* or message : EMAIL or url.original : *EMAIL*"  # message is text, url.original keyword
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "siem-dashboard.ndjson")
 
 
@@ -163,7 +171,27 @@ objects = [
                  "**filtered**, **enriched** with threat intel and the asset inventory, and **PII-masked** "
                  "(`user.name` is a salted hash, e-mails are redacted).\n\n"
                  "The **full, unfiltered copy** of every log line is kept as **Apache Iceberg** tables by "
-                 "**Tableflow** (Confluent-managed storage) - for forensics, compliance and analytics at object-storage cost.")}})},
+                 "**Tableflow** (Confluent-managed storage) - for forensics, compliance and analytics at object-storage cost.\n\n"
+                 f"[Open all SIEM events in Discover]({DISCOVER_SIEM})")}})},
+     "references": []},
+
+    {"id": "md-pii", "type": "visualization",
+     "attributes": {
+         "title": "Check PII masking", "description": "", "uiStateJSON": "{}",
+         "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({"query": {"query": "", "language": "kuery"}, "filter": []})},
+         "visState": json.dumps({"title": "Check PII masking", "type": "markdown", "aggs": [], "params": {
+             "fontSize": 11, "openLinksInNewTab": True, "markdown": (
+                 f"**[Open the PII masking check in Discover]({DISCOVER_PII})**\n\n"
+                 "Flink masks personal data *before* it leaves Confluent Cloud - the SIEM never stores it:\n\n"
+                 "| Field | Masked as |\n|---|---|\n"
+                 "| `user.name` | `user-` + 12 hex chars (salted SHA-256, same user = same value) |\n"
+                 "| `message` - user names | `[USER]` |\n"
+                 "| `message`, `url.original` - e-mails | `[EMAIL]` |\n\n"
+                 "Example: `Failed password for [USER] from 203.0.113.66 port 51234 ssh2`\n\n"
+                 "**Pass:** no real name or e-mail address in the table on the right.\n\n"
+                 "Search tips: `user.name : user-*` - `message : EMAIL`. "
+                 "Kibana's word search ignores brackets, so look for `[USER]` in the message column.\n\n"
+                 "The unmasked originals stay in the Iceberg lake: `./scripts/03-lake-query.sh`.")}})},
      "references": []},
 
     {"id": "search-siem", "type": "search",
@@ -174,6 +202,16 @@ objects = [
          "sort": [["event_time", "desc"]], "grid": {}, "hideChart": True,
          "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({
              "query": {"query": "", "language": "kuery"}, "filter": [],
+             "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"})}},
+     "references": [{"name": "kibanaSavedObjectMeta.searchSourceJSON.index", "type": "index-pattern", "id": SIEM_DV}]},
+
+    {"id": "search-pii", "type": "search",
+     "attributes": {
+         "title": "PII masking check (pseudonymized users, redacted e-mails)", "description": "",
+         "columns": ["event.dataset", "user.name", "message", "url.original"],
+         "sort": [["event_time", "desc"]], "grid": {}, "hideChart": True,
+         "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({
+             "query": {"query": PII_QUERY, "language": "kuery"}, "filter": [],
              "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"})}},
      "references": [{"name": "kibanaSavedObjectMeta.searchSourceJSON.index", "type": "index-pattern", "id": SIEM_DV}]},
 ]
@@ -191,6 +229,8 @@ layout = [  # (panel id, saved object type, x, y, w, h)
     ("lens-critical", "lens", 30, 24, 18, 14),
     ("lens-threats", "lens", 0, 38, 20, 15),
     ("search-siem", "search", 20, 38, 28, 15),
+    ("md-pii", "visualization", 0, 53, 16, 16),
+    ("search-pii", "search", 16, 53, 32, 16),
 ]
 panels, references = [], []
 for i, (obj_id, obj_type, x, y, w, h) in enumerate(layout):

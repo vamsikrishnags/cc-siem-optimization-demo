@@ -58,3 +58,14 @@ next_steps() {
 }
 
 KIBANA_URL="http://localhost:5601/app/dashboards#/view/siem-optimization"
+# Discover, data view "SIEM events (Confluent curated)" - saved searches from docker/elastic/kibana/build_dashboard.py
+DISCOVER_URL="http://localhost:5601/app/discover#/view/search-siem?_g=(time:(from:now-1h,to:now))"
+PII_CHECK_URL="http://localhost:5601/app/discover#/view/search-pii?_g=(time:(from:now-1h,to:now))"
+
+# Topics / Flink tables are <name>_<DEMO_ID> in Confluent Cloud (same list as terraform/flink.tf).
+DEMO_TABLES="zeek_conn_raw zeek_dns_raw zeek_http_raw syslog_raw zeek_conn zeek_dns zeek_http syslog_events siem_events pipeline_metrics threat_intel asset_inventory"
+
+# Appends the demo id to every backticked table name in SQL on stdin, like Terraform does.
+suffix_tables() {
+  sed -E "s/\`($(printf '%s' "$DEMO_TABLES" | tr ' ' '|'))\`/\`\\1_${DEMO_ID}\`/g"
+}

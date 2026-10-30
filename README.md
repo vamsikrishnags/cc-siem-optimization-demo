@@ -83,6 +83,8 @@ demo's resources are easy to find, audit and delete later:
 |---|---|
 | Environment (when Terraform creates it) | `siem-demo-<id>` |
 | Kafka cluster | `siem-demo-<id>` |
+| Topics / Flink tables / Iceberg tables | `<name>_<id>`, e.g. `syslog_raw_<id>`, `zeek_conn_<id>`, `siem_events_<id>`, `threat_intel_<id>` |
+| Schema Registry subjects | `<table>_<id>-key`, `<table>_<id>-value` |
 | Flink compute pool / statements | `siem-<id>-pool`, `siem-<id>-normalize`, `siem-<id>-siem-dns`, ... |
 | API keys (owned by the bootstrap service account) | `siem-<id>-kafka`, `siem-<id>-schema-registry`, `siem-<id>-flink`, `siem-<id>-tableflow` |
 | Kafka Connect group / internal topics | `siem-<id>-connect`, `_siem-<id>-connect-*` |
@@ -91,6 +93,12 @@ demo's resources are easy to find, audit and delete later:
 `./scripts/00-check-prereqs.sh` generates the id on first run and saves it as `DEMO_ID` in `demo.properties`.
 You can also set your own (3–12 lowercase letters or digits). Keep it for the life of the demo, because teardown
 uses it to find the resources.
+
+Because the topic and subject names carry the id, several demos can share one environment without clashing.
+The docs and SQL files use the short names (`zeek_conn`, `siem_events`, ...). Terraform appends `_<id>` to every
+table name when it submits a statement, and `./scripts/07-flink-sql.sh` prints the ad-hoc queries with your names.
+In Elastic the indices are `siem_events_<id>` and `pipeline_metrics_<id>` (the sink names them after the topic);
+the index templates add the short names as aliases, which Kibana and the scripts use.
 
 ```bash
 cp demo.properties.example demo.properties
@@ -199,12 +207,16 @@ To confirm the cloud side is healthy, open **Confluent Cloud → your environmen
 When everything is running, it looks like this:
 - the Fluent Bit and reference-loader producers write to the raw and reference topics
 - the `siem-<id>-normalize` statement fans out to the governed topics
-- the four `siem-<id>-siem-*` statements join the reference tables and write to `siem_events`
+- the four `siem-<id>-siem-*` statements join the reference tables and write to `siem_events_<id>`
 
 <img src="docs/stream-lineage.png" alt="Stream Lineage in Confluent Cloud with all components running" width="100%">
 
 Open **Kibana → Confluent SIEM Optimization**: <http://localhost:5601/app/dashboards#/view/siem-optimization>.
 Alerts appear within about 1–2 minutes. The volume tiles fill in as each one-minute window closes.
+
+To browse the individual events, open **Discover** with the data view **SIEM events (Confluent curated)**:
+<http://localhost:5601/app/discover#/view/search-siem?_g=(time:(from:now-1h,to:now))>.
+To check the masking, see [Check PII masking in Kibana](#check-pii-masking-in-kibana).
 
 Tableflow commits Iceberg snapshots every few minutes. After about 10–15 minutes:
 
@@ -217,18 +229,75 @@ Tableflow commits Iceberg snapshots every few minutes. After about 10–15 minut
 `06-duckdb-ui.sh` needs the DuckDB CLI on the Mac (`curl https://install.duckdb.org | sh` or `brew install duckdb`).
 It attaches the Tableflow catalog and creates the same four views. Catalog tokens expire after about 30 minutes; type `.exit` and re-run.
 
+### Check PII masking in Kibana
+
+Flink masks personal data before it leaves Confluent Cloud, so the SIEM never stores it
+([`13_siem_syslog.sql`](flink/dml/13_siem_syslog.sql), [`12_siem_http.sql`](flink/dml/12_siem_http.sql)).
+
+| Where | What changes | Masked as |
+|---|---|---|
+| `user.name` | User name, pseudonymized with a salted SHA-256 hash. The same user always gets the same value, so per-user counts still work. | `user-` + 12 hex characters |
+| `message` | User names in sshd, sudo, useradd/usermod and home-directory text | `[USER]` |
+| `message`, `url.original` | E-mail addresses (in syslog text and in HTTP URLs) | `[EMAIL]` |
+
+**Quickest check:** open the saved search **PII masking check**. It's already filtered to masked events and shows
+the right columns:
+<http://localhost:5601/app/discover#/view/search-pii?_g=(time:(from:now-1h,to:now))>
+
+The same link, with these instructions, is in the **Check PII masking** panel at the bottom of the
+dashboard. `./scripts/02-start-local.sh` and `./scripts/05-status.sh` print it too.
+
+**Step by step**, to explore on your own:
+
+1. Open **Kibana → Discover** with the data view **SIEM events (Confluent curated)**:
+   <http://localhost:5601/app/discover#/view/search-siem?_g=(time:(from:now-1h,to:now))>
+2. Check the time range at the top right. The links default to *Last 1 hour*.
+3. Search with KQL:
+
+   | To find | KQL |
+   |---|---|
+   | Events with a pseudonymized user | `user.name : user-*` |
+   | Messages with an e-mail address removed | `message : EMAIL` |
+   | SSH failures from masked users | `user.name : user-* and message : "Failed password"` |
+
+4. In the field list on the left, add the columns `user.name`, `message` and `event.dataset`.
+
+Expected rows look like this (sample data):
+
+| event.dataset | user.name | message |
+|---|---|---|
+| syslog | `user-1f3c9a7b2e4d` | `Failed password for [USER] from 203.0.113.66 port 51234 ssh2` |
+| syslog | `user-8b20d4e6c1a9` | `Failed password for invalid user [USER] from 203.0.113.45 port 40112 ssh2` |
+| syslog | `user-5e7f01c3d2b8` | `MFA device removed for [EMAIL] from 10.10.20.31` |
+| syslog | `user-c4a9e2b17f60` | `[USER] : TTY=pts/0 ; PWD=/home/[USER] ; USER=root ; COMMAND=/bin/bash` |
+
+A real name or e-mail address in `user.name` or `message` means masking failed. The **PII masking check** table at
+the bottom of the **Confluent SIEM Optimization** dashboard shows the same columns.
+
+Kibana's word search ignores brackets and case, so `message : USER` also matches the plain words "invalid user".
+Look for `[USER]` in the `message` column rather than searching for it.
+
+**Compare with the lake.** The Iceberg tables keep the unmasked originals for governed access.
+`./scripts/03-lake-query.sh` runs a re-identification query that shows the real names behind the masked SSH
+failures (sample output):
+
+| user_name | src_ip | failures |
+|---|---|---|
+| `admin` | `203.0.113.66` | 42 |
+| `oracle` | `203.0.113.45` | 17 |
+
 ---
 
 ## Demo talk track (≈15 min)
 
-1. **The problem.** Confluent Cloud UI → topics `syslog_raw` and `zeek_*_raw`: about 3k events/min of mostly noise, all of it billed by the SIEM.
-2. **Normalize.** Flink workspace → [`flink/adhoc/demo_queries.sql`](flink/adhoc/demo_queries.sql) queries 1 and 2. Raw, schemaless JSON and free-text syslog become typed, Schema Registry–governed tables.
+1. **The problem.** Confluent Cloud UI → topics `syslog_raw_<id>` and `zeek_*_raw_<id>`: about 3k events/min of mostly noise, all of it billed by the SIEM.
+2. **Normalize.** Flink workspace → [`flink/adhoc/demo_queries.sql`](flink/adhoc/demo_queries.sql) queries 1 and 2 (`./scripts/07-flink-sql.sh` prints them with your table names). Raw, schemaless JSON and free-text syslog become typed, Schema Registry–governed tables.
 3. **Filter, enrich, mask.** Open statement `siem-<id>-siem-syslog` or `siem-<id>-siem-dns`. Walk through the three commented sections, then run query 4 to show what actually goes to the SIEM.
 4. **The SIEM.** Kibana dashboard:
    - ~96% volume reduction, live
    - the "why kept" rules and threat-intel matches with asset owner and criticality
-   - `user.name` shows as `user-3f2a…` and messages read `Failed password for [USER] from …`
-5. **Agility.** `./scripts/04-add-threat-indicator.sh` adds the port scanner `198.51.100.200` as an indicator. Within seconds every one of its probes appears in Kibana as *Threat intel match: scanner*. There's no SIEM rule change, no re-indexing and no redeploy. The same can be done with `INSERT INTO threat_intel ...` in Flink (query 5).
+   - `user.name` shows as `user-3f2a…` and messages read `Failed password for [USER] from …`. The **Check PII masking** panel at the bottom links to the [PII masking check](http://localhost:5601/app/discover#/view/search-pii?_g=(time:(from:now-1h,to:now))) in Discover.
+5. **Agility.** `./scripts/04-add-threat-indicator.sh` adds the port scanner `198.51.100.200` as an indicator. Within seconds every one of its probes appears in Kibana as *Threat intel match: scanner*. There's no SIEM rule change, no re-indexing and no redeploy. The same can be done with `INSERT INTO threat_intel_<id> ...` in Flink (query 5).
 6. **Nothing is lost.** `./scripts/03-lake-query.sh` shows 100% of the events in the Iceberg tables, forensics on events the SIEM never received, and governed re-identification of masked users.
 7. **The connector.** Kafka Connect REST shows the Elasticsearch Sink connector (`localhost:8083`). The same connector is also available fully managed. The demo runs it self-managed because Elastic is on the laptop.
 
@@ -239,7 +308,7 @@ It attaches the Tableflow catalog and creates the same four views. Catalog token
 ```
 demo.properties.example    all inputs (copy to demo.properties)
 scripts/                   00-check-prereqs · 01-provision-cloud · 02-start-local · 03-lake-query ·
-                           04-add-threat-indicator · 05-status · 06-duckdb-ui · 99-teardown
+                           04-add-threat-indicator · 05-status · 06-duckdb-ui · 07-flink-sql · 99-teardown
 terraform/                 confluent.tf (env, Standard cluster, SR, keys, raw topics)
                            flink.tf     (compute pool + every statement, in dependency order)
                            tableflow.tf (Tableflow, Confluent-managed storage, on zeek_conn/dns/http, syslog_events)
@@ -274,7 +343,7 @@ docker/elastic/            index templates, Kibana dashboard (build_dashboard.py
 | Kibana is empty | `./scripts/05-status.sh`. Then check Confluent Cloud → Flink → statements are RUNNING, and `docker compose logs fluent-bit connect`. |
 | Volume tiles are empty but alerts show | Windows close one minute after the last event. Wait 1–2 minutes. |
 | `lake-query`: table not queryable yet | Tableflow hasn't committed a snapshot yet. Wait about 10 minutes, then check Confluent Cloud → Topics → Tableflow. DuckDB tokens expire after about 30 minutes, so just re-run the script. |
-| Finding a demo's leftovers | Search the Confluent Cloud console for the demo id: environment and cluster `siem-demo-<id>`, API keys and statements `siem-<id>-*`. Schema subjects don't carry the id; see [Teardown](#teardown). |
+| Finding a demo's leftovers | Search the Confluent Cloud console for the demo id: environment and cluster `siem-demo-<id>`, API keys and statements `siem-<id>-*`, topics and schema subjects `*_<id>`. |
 | Laptop is slow | Lower `SYSLOG_EVENTS_PER_SEC`, or give Docker more memory. |
 
 ## Teardown
@@ -284,15 +353,15 @@ docker/elastic/            index templates, Kibana dashboard (build_dashboard.py
 ```
 
 Teardown also offers to **hard-delete the Schema Registry subjects** the Flink tables registered
-(`zeek_conn-key/-value`, `syslog_events-*`, `siem_events-value`, `threat_intel-*`, ...). Flink creates them, not
+(`zeek_conn_<id>-key/-value`, `syslog_events_<id>-*`, `siem_events_<id>-value`, `threat_intel_<id>-*`, ...). Flink creates them, not
 Terraform, and they belong to the environment's Schema Registry, so `terraform destroy` alone leaves them behind.
-Answer **n** if another demo is still running in the same environment, because the subject names are shared.
+Only this demo's subjects are deleted; other demos in the same environment are not touched.
 
 Leftover subjects from an earlier teardown (its Schema Registry key is already gone) can be removed with the
 Confluent CLI, logged in as a user with access to the environment:
 
 ```bash
-python3 scripts/delete_schemas.py --print-cli env-xxxxx      # prints soft + permanent delete commands
+DEMO_ID=<id> python3 scripts/delete_schemas.py --print-cli env-xxxxx      # prints soft + permanent delete commands
 python3 scripts/delete_schemas.py --print-cli env-xxxxx | sh # or run them directly
 ```
 
@@ -316,5 +385,8 @@ which also contains secrets, so keep it until teardown), and `data/` (the pcap).
 ## Data sources and attribution
 
 - Zeek capture: public `zeek_streamer.pcap` used by [confluentinc/demo-siem-optimization](https://github.com/confluentinc/demo-siem-optimization). Downloaded at runtime.
-- Ad/tracker watchlist: `ad_servers.csv` from the same repo (MVPS hosts list). Downloaded at runtime.
+- Ad/tracker watchlist: [`docker/tools/data/ad_servers.csv`](docker/tools/data/ad_servers.csv), copied unchanged from the same repo.
+  It is derived from the [MVPS HOSTS file](https://winhelp2002.mvps.org/hosts.htm) and licensed by its authors under
+  [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/); see their site for the terms. It is bundled so the
+  demo doesn't depend on an external link. To load a different list, set `WATCHLIST_URL` in `demo.properties`.
 - The threat-intel attributions on real IPs and domains are **illustrative demo labels** based on behavior in the capture. They are not real-world verdicts. Synthetic attacker IPs come from RFC 5737 documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`).

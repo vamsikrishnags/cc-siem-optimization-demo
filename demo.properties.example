@@ -6,7 +6,8 @@
 
 # ---------------------------------------------------------------------
 # Demo id - unique suffix appended to every resource name
-# (environment, cluster, Flink pool and statements, API keys, Connect group).
+# (environment, cluster, Flink pool and statements, API keys, Connect group, topics / Flink tables
+# and their Schema Registry subjects, e.g. zeek_conn_<DEMO_ID>-value).
 # Leave empty: ./scripts/00-check-prereqs.sh generates one and writes it here.
 # Keep it for the life of the demo so teardown and re-runs find the same resources.
 # ---------------------------------------------------------------------
@@ -54,5 +55,8 @@ PCAP_URL=https://demo-siem-optimization.s3.us-east-2.amazonaws.com/pcaps/zeek_st
 PCAP_REPLAY_MULTIPLIER=1
 # Synthetic firewall / sshd / system syslog events per second
 SYSLOG_EVENTS_PER_SEC=40
-# Public ad/tracker watchlist loaded into threat_intel (from the reference repo)
-WATCHLIST_URL=https://raw.githubusercontent.com/confluentinc/demo-siem-optimization/main/spooldir/ad_hosts/csv_input/ad_servers.csv
+# Ad/tracker watchlist loaded into threat_intel. A copy ships with the demo (docker/tools/data/ad_servers.csv).
+# Leave empty to use it; set a URL to a CSV with a "domain" column to download a list instead
+# (falls back to the bundled copy if the download fails), e.g.
+#   https://raw.githubusercontent.com/confluentinc/demo-siem-optimization/main/spooldir/ad_hosts/csv_input/ad_servers.csv
+WATCHLIST_URL=
